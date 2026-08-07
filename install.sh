@@ -36,7 +36,6 @@ LEGACY_BACKEND_PACKAGE="${LEGACY_BRAND}-plus"
 LEGACY_CONFIG_PACKAGE_ALT="${LEGACY_BRAND}_plus"
 LEGACY_CONFIG_BACKUP=""
 
-command -v apk >/dev/null 2>&1 && PKG_IS_APK=1
 
 msg() {
     printf '\033[32;1m%s\033[0m\n' "$1"
@@ -59,6 +58,10 @@ Installs or updates Forkop packages:
   - forkop
   - luci-app-forkop
   - luci-i18n-forkop-ru when requested or when LuCI language is Russian
+  - https-dns-proxy (required DNS upstream, no FakeIP)
+  - luci-app-https-dns-proxy (LuCI UI)
+  - luci-i18n-https-dns-proxy-ru when Russian UI is selected
+  Supports opkg (OpenWrt 24.10) and apk (OpenWrt 25.12+)
 
 Can also install or switch sing-box variant:
   - stable sing-box from OpenWrt feeds
@@ -788,33 +791,10 @@ function installer_remove_package_prefix(prefix) {
 }
 
 function installer_confirm_remove_https_dns_proxy() {
-    if (!installer_package_installed("https-dns-proxy"))
-        return true;
-
-    warn("Detected conflicting package: https-dns-proxy\n");
-
-    if (run("[ ! -t 0 ]")) {
-        warn("Remove the conflicting https-dns-proxy package and continue?: 1 (yes, non-interactive)\n");
-        return true;
-    }
-
-    while (true) {
-        warn("\nRemove the conflicting https-dns-proxy package and continue?\n");
-        warn("  1) yes\n");
-        warn("  2) no\n");
-        warn("Select [2]: ");
-
-        let input = fs.open("/dev/stdin", "r");
-        let answer = input ? trim(as_string(input.read("line"))) : "";
-        if (input)
-            input.close();
-
-        if (answer == "1")
-            return true;
-        if (answer == "" || answer == "2")
-            return false;
-        warn("Invalid choice\n");
-    }
+    // Economy mode uses https-dns-proxy as DoH/DoT upstream — keep the package.
+    if (installer_package_installed("https-dns-proxy"))
+        msg("https-dns-proxy detected: will be used as DNS upstream in routing_mode=economy\n");
+    return true;
 }
 
 function path_basename(path) {
@@ -1051,11 +1031,7 @@ function installer_cleanup_legacy() {
     }
 
     let packages_removed = true;
-    for (let package_name in [ "luci-app-https-dns-proxy", "https-dns-proxy" ])
-        if (!installer_remove_package(package_name))
-            packages_removed = false;
-    if (!installer_remove_package_prefix("luci-i18n-https-dns-proxy"))
-        packages_removed = false;
+    // Keep https-dns-proxy / luci-app-https-dns-proxy for economy DNS upstream
 
     if (legacy_installed) {
         if (!installer_remove_package_prefix("luci-i18n-" + LEGACY_BACKEND_PACKAGE))
@@ -1469,6 +1445,76 @@ download_with_retry() {
 
     return 1
 }
+
+
+# PKG_MANAGER: opkg (OpenWrt 24.10) or apk (OpenWrt 25.12+)
+PKG_MANAGER=""
+
+detect_package_manager() {
+    # Prefer the native package manager of the running system.
+    # OpenWrt 25.12+ ships apk as the primary tool; 24.10 uses opkg.
+    # Some images may have a residual binary of the other tool — probe functionality.
+
+    apk_ok=0
+    opkg_ok=0
+
+    if command -v apk >/dev/null 2>&1; then
+        # apk --version works on OpenWrt apk builds; also require world/db access
+        if apk --version >/dev/null 2>&1; then
+            if apk info >/dev/null 2>&1 || apk policy >/dev/null 2>&1 || [ -d /lib/apk/db ] || [ -d /etc/apk ]; then
+                apk_ok=1
+            fi
+        fi
+    fi
+
+    if command -v opkg >/dev/null 2>&1; then
+        if opkg --version >/dev/null 2>&1 || opkg list-installed >/dev/null 2>&1; then
+            if [ -f /usr/lib/opkg/status ] || [ -d /usr/lib/opkg ] || [ -f /var/opkg-lists/openwrt_core ] || opkg list-installed >/dev/null 2>&1; then
+                opkg_ok=1
+            fi
+        fi
+    fi
+
+    # Decision: if both present, prefer the one matching system layout
+    if [ "$apk_ok" -eq 1 ] && [ "$opkg_ok" -eq 1 ]; then
+        if [ -d /lib/apk/db ] || [ -f /lib/apk/db/installed ]; then
+            PKG_MANAGER="apk"
+        elif [ -f /usr/lib/opkg/status ]; then
+            PKG_MANAGER="opkg"
+        else
+            # Default for newer OpenWrt when both exist: apk
+            PKG_MANAGER="apk"
+        fi
+    elif [ "$apk_ok" -eq 1 ]; then
+        PKG_MANAGER="apk"
+    elif [ "$opkg_ok" -eq 1 ]; then
+        PKG_MANAGER="opkg"
+    else
+        fail "No supported package manager found (need opkg for OpenWrt 24.10 or apk for OpenWrt 25.12+)"
+    fi
+
+    if [ "$PKG_MANAGER" = "apk" ]; then
+        PKG_IS_APK=1
+    else
+        PKG_IS_APK=0
+    fi
+
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        msg "Package manager: apk (OpenWrt 25.12+)"
+    else
+        msg "Package manager: opkg (OpenWrt 24.10)"
+    fi
+}
+
+pkg_remove_name() {
+    pkg_name="$1"
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        apk del "$pkg_name" </dev/null 2>/dev/null || true
+    else
+        opkg remove --force-depends "$pkg_name" </dev/null 2>/dev/null || true
+    fi
+}
+
 
 pkg_is_installed() {
     pkg_name="$1"
@@ -1911,6 +1957,54 @@ download_forkop_packages() {
     fi
 }
 
+
+install_dns_package() {
+    # $1 = package name, $2 = required (1) or optional (0)
+    pkg_name="$1"
+    required="${2:-1}"
+
+    if pkg_is_installed "$pkg_name"; then
+        msg "Already installed: $pkg_name"
+        return 0
+    fi
+
+    msg "Installing ($PKG_MANAGER): $pkg_name"
+    if pkg_install_name "$pkg_name"; then
+        msg "Installed: $pkg_name"
+        return 0
+    fi
+
+    if [ "$required" = "1" ]; then
+        fail "Failed to install required package: $pkg_name (package manager: $PKG_MANAGER)"
+    fi
+    warn "Optional package not available: $pkg_name — skipping"
+    return 1
+}
+
+install_dns_dependencies() {
+    msg "Installing DNS stack (https-dns-proxy) via $PKG_MANAGER"
+
+    # Core daemon — required
+    install_dns_package "https-dns-proxy" 1
+
+    # LuCI app — required for UI management of DoH/DoT
+    install_dns_package "luci-app-https-dns-proxy" 1
+
+    # Russian translation when RU UI selected
+    if [ "$FORKOP_I18N_REQUESTED" -eq 1 ] || [ "$INSTALLER_LANG" = "ru" ]; then
+        install_dns_package "luci-i18n-https-dns-proxy-ru" 0
+    fi
+
+    if [ -x /etc/init.d/https-dns-proxy ]; then
+        /etc/init.d/https-dns-proxy enable >/dev/null 2>&1 || true
+        /etc/init.d/https-dns-proxy start >/dev/null 2>&1 || \
+            /etc/init.d/https-dns-proxy restart >/dev/null 2>&1 || \
+            warn "Could not start https-dns-proxy; configure it in LuCI and start manually"
+    else
+        warn "https-dns-proxy init script not found after install"
+    fi
+}
+
 install_backend_package() {
     pkg_install_files "$FORKOP_BACKEND_FILE" || fail "forkop installation failed"
 }
@@ -1962,6 +2056,7 @@ main() {
     parse_args "$@"
     check_root
     init_tmp_dir
+    detect_package_manager
     detect_fetcher
     sync_time
     check_system
@@ -1977,6 +2072,7 @@ main() {
     download_forkop_packages
 
     cleanup_legacy_installation
+    install_dns_dependencies
     install_backend_package
     migrate_legacy_configuration
     install_ui_packages

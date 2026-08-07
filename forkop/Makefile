@@ -22,15 +22,15 @@ include $(INCLUDE_DIR)/package.mk
 define Package/forkop
 	SECTION:=net
 	CATEGORY:=Network
-	DEPENDS:=+ca-bundle +kmod-inet-diag +kmod-netlink-diag +kmod-tun +curl +ucode +ucode-mod-fs +ucode-mod-uci +kmod-nft-tproxy +coreutils-base64 +bind-dig +nftables +kmod-nft-nat +ip-full
-	CONFLICTS:=https-dns-proxy nextdns luci-app-passwall luci-app-passwall2
+	DEPENDS:=+ca-bundle +kmod-inet-diag +kmod-netlink-diag +kmod-tun +curl +ucode +ucode-mod-fs +ucode-mod-uci +kmod-nft-tproxy +coreutils-base64 +bind-dig +nftables +kmod-nft-nat +ip-full +https-dns-proxy
+	CONFLICTS:=nextdns luci-app-passwall luci-app-passwall2
 	TITLE:=Forkop backend service
 	URL:=https://github.com/ushan0v/forkop
 	PKGARCH:=all
 endef
 
 define Package/forkop/description
-	Rule-based Forkop backend with hybrid sing-box + zapret orchestration
+	Rule-based Forkop backend: dnsmasq + https-dns-proxy + sing-box transport (no FakeIP)
 endef
 
 define Build/Configure

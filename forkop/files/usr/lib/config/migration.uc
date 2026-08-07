@@ -1284,10 +1284,23 @@ function migrate_http_connection_urls(ctx) {
     }
 }
 
+
+function migrate_routing_mode(ctx) {
+    // Default economy: dnsmasq + https-dns-proxy, no FakeIP
+    let current = option(ctx.model.settings, "routing_mode", "");
+    if (current == "")
+        set_option(ctx, ctx.model.settings, "routing_mode", "economy");
+    if (option(ctx.model.settings, "economy_dns_backend", "") == "")
+        set_option(ctx, ctx.model.settings, "economy_dns_backend", "https-dns-proxy");
+    if (option(ctx.model.settings, "economy_domain_resolve", "") == "")
+        set_option(ctx, ctx.model.settings, "economy_domain_resolve", "dnsmasq_nftset");
+}
+
 const MIGRATIONS = [
     { id: "interface_sections", run: migrate_interface_sections },
     { id: "enable_component_checks", run: migrate_enable_component_checks },
-    { id: "http_connection_urls", run: migrate_http_connection_urls }
+    { id: "http_connection_urls", run: migrate_http_connection_urls },
+    { id: "routing_mode", run: migrate_routing_mode }
 ];
 
 function apply_migrations(ctx) {

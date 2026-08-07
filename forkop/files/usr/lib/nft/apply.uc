@@ -8,6 +8,7 @@ let rule_config = require("config.rule");
 let domain_config = require("config.domain");
 let connections = require("config.connections");
 let routing_rulesets = require("routing.rulesets");
+let direct_path = require("routing.direct_path");
 let runtime_constants = require("singbox.constants");
 const CONFIG_NAME = getenv("FORKOP_CONFIG_NAME") || "forkop";
 const DNS_SOURCE_SET = "forkop_dns_sources";
@@ -16,6 +17,19 @@ const DNS_SOURCE6_SET = "forkop_dns_sources6";
 let common_read_json_file = common.read_json_file;
 let list_option = common.list_option;
 let bool_option = common.bool_option;
+
+
+function routing_mode_is_economy() {
+    // FakeIP fully removed — always real-IP / economy datapath
+    return true;
+}
+
+function nft_capture_mark(fakeip_mark) {
+    // Economy uses dedicated proxy mark when provided via env, else same mark slot
+    if (routing_mode_is_economy())
+        return getenv("NFT_PROXY_MARK") || "0x05000000";
+    return as_string(fakeip_mark);
+}
 
 function as_string(value) {
     return value == null ? "" : "" + value;
@@ -559,8 +573,18 @@ function section_action(section) {
 }
 
 function action_captures_traffic(action) {
+    // Used for nft set matching; does not imply sing-box/TPROXY.
     return action == "connection" || action == "proxy" || action == "outbound" || action == "vpn" ||
         action == "block" || action == "zapret" || action == "zapret2" || action == "byedpi";
+}
+
+function action_uses_tproxy(action) {
+    // Only proxy-family sections enter TPROXY → sing-box
+    return action == "connection" || action == "proxy" || action == "outbound";
+}
+
+function action_uses_provider_queue(action) {
+    return action == "zapret" || action == "zapret2";
 }
 
 function section_priority_action(section) {
@@ -788,11 +812,206 @@ function nft_add_section_priority_rules_from_sections(sections, table, interface
         section = object_or_empty(section);
         if (!bool_option(section, "enabled", true))
             continue;
+        let action = section_action(section);
+        // VPN / Zapret / ByeDPI must not receive the TPROXY/sing-box capture mark
+        if (!action_uses_tproxy(action) && action != "block" && action != "bypass") {
+            // Still create sets for domain→IP (eco sets) but do not mark for TPROXY
+            // Provider queue marks are applied via nft_create_provider_output_rules_* 
+            if (action_uses_provider_queue(action) || action == "vpn" || action == "byedpi")
+                continue;
+        }
         if (!nft_add_section_priority_rules(table, section, interface_set, localv4_set, localv6_set, mark, fakeip_range, fakeip6_range))
             return false;
     }
     return true;
 }
+
+
+function nft_create_economy_section_sets(table) {
+    if (!routing_mode_is_economy())
+        return true;
+    // Dynamic domain→IP sets filled by dnsmasq nftset= (timeout, not static bulk load)
+    let timeout = getenv("FORKOP_NFTSET_TIMEOUT") || "1h";
+    let pipe = popen("uci -q show forkop 2>/dev/null | grep '=section$' | cut -d. -f2 | cut -d= -f1", "r");
+    let raw = pipe != null ? pipe.read("all") : "";
+    if (pipe != null)
+        pipe.close();
+    for (let name in split(as_string(raw), "\n")) {
+        name = trim(name);
+        if (name == "" || name == "settings")
+            continue;
+        let safe = replace(name, /[^A-Za-z0-9_]/g, "_");
+        if (length(safe) > 40)
+            safe = substr(safe, 0, 40);
+        let set4 = "eco_" + safe + "_v4";
+        let set6 = "eco_" + safe + "_v6";
+        // interval+timeout: DNS adds single IPs; CIDR can still be merged manually
+        if (!nft_create_set(table, set4, "{ type ipv4_addr; flags interval,timeout; timeout " + timeout + "; auto-merge; }") ||
+            !nft_create_set(table, set6, "{ type ipv6_addr; flags interval,timeout; timeout " + timeout + "; auto-merge; }"))
+            return false;
+    }
+    return true;
+}
+
+/**
+ * Mark traffic whose dest IP was learned via dnsmasq→nftset (eco_* sets).
+ * Proxy/block: capture mark (TPROXY). VPN/zapret handled in direct_path with same sets.
+ */
+function nft_add_economy_domain_capture_rules(table, interface_set, localv4_set, localv6_set, mark) {
+    if (!routing_mode_is_economy())
+        return true;
+    interface_set = as_string(interface_set || "forkop_interfaces");
+    localv4_set = as_string(localv4_set || "localv4");
+    localv6_set = as_string(localv6_set || "localv6");
+    mark = as_string(mark);
+
+    let pipe = popen("uci -q show forkop 2>/dev/null | grep '=section$' | cut -d. -f2 | cut -d= -f1", "r");
+    let raw = pipe != null ? pipe.read("all") : "";
+    if (pipe != null)
+        pipe.close();
+
+    for (let name in split(as_string(raw), "\n")) {
+        name = trim(name);
+        if (name == "" || name == "settings")
+            continue;
+        let enabled = as_string(uci_get_simple(name, "enabled"));
+        if (enabled == "0" || enabled == "false")
+            continue;
+        let action = as_string(uci_get_simple(name, "action"));
+        // Only TPROXY backends use the shared proxy capture mark via eco sets
+        if (action != "connection" && action != "proxy" && action != "outbound" && action != "block")
+            continue;
+
+        let safe = replace(name, /[^A-Za-z0-9_]/g, "_");
+        if (length(safe) > 40)
+            safe = substr(safe, 0, 40);
+        let set4 = "eco_" + safe + "_v4";
+        let set6 = "eco_" + safe + "_v6";
+
+        if (action == "block") {
+            // drop can be added later; for now mark like capture
+        }
+        if (!nft_add_rule(table, "priority_rules", [
+            "iifname", "@" + interface_set,
+            "ip", "daddr", "@" + set4,
+            "ip", "daddr", "!=", "@" + localv4_set,
+            "meta", "mark", "set", mark, "counter"
+        ]))
+            return false;
+        if (!nft_add_rule(table, "priority_rules", [
+            "iifname", "@" + interface_set,
+            "ip6", "daddr", "@" + set6,
+            "ip6", "daddr", "!=", "@" + localv6_set,
+            "meta", "mark", "set", mark, "counter"
+        ]))
+            return false;
+    }
+    return true;
+}
+
+
+/**
+ * LAN client policy (homeproxy / ruantiblock style):
+ *   lan_proxy_mode:
+ *     disabled     — no client filter
+ *     except_listed — listed IP/MAC skip proxy (return)
+ *     listed_only  — only listed IP/MAC get capture; others return early
+ */
+function nft_add_lan_client_policy(table, interface_set) {
+    let mode = lc(trim(as_string(uci_get_simple("settings", "lan_proxy_mode"))));
+    if (mode == "")
+        mode = "disabled";
+    if (mode == "disabled" || mode == "0" || mode == "off")
+        return true;
+
+    interface_set = as_string(interface_set || "forkop_interfaces");
+
+    function read_list(key) {
+        let raw = as_string(uci_get_simple("settings", key));
+        let out = [];
+        for (let v in split(raw, /[ \t\n]/)) {
+            v = trim(v);
+            if (v != "")
+                push(out, v);
+        }
+        // uci list may need: uci get returns space-separated
+        return out;
+    }
+
+    let direct_ip4 = read_list("lan_direct_ipv4_ips");
+    let direct_mac = read_list("lan_direct_mac_addrs");
+    let proxy_ip4 = read_list("lan_proxy_ipv4_ips");
+    let proxy_mac = read_list("lan_proxy_mac_addrs");
+
+    if (mode == "except_listed") {
+        for (let ip in direct_ip4) {
+            if (!nft_add_rule(table, "priority_rules", [
+                "iifname", "@" + interface_set, "ip", "saddr", ip, "counter", "return"
+            ]))
+                return false;
+        }
+        for (let mac in direct_mac) {
+            if (!nft_add_rule(table, "priority_rules", [
+                "iifname", "@" + interface_set, "ether", "saddr", mac, "counter", "return"
+            ]))
+                return false;
+        }
+        return true;
+    }
+
+    if (mode == "listed_only") {
+        // Non-listed clients: return (do not capture). Listed: fall through to mark rules.
+        // Invert: return unless saddr in list — nft: jump only for listed is easier.
+        // Strategy: first return all traffic from LAN, then accept/mark is not possible
+        // after return. Better: only mark rules apply to listed; at end of priority
+        // nothing marks others — but later default TPROXY mark might still catch.
+        // So: return everything from LAN first... no that blocks all.
+        // Correct listed_only: if not in list → return; if in list → continue.
+        // nft has no easy "not in set" without a set. Build set.
+        if (length(proxy_ip4) > 0) {
+            let setname = "lan_proxy_v4";
+            nft_create_set(table, setname, "{ type ipv4_addr; flags interval; auto-merge; }");
+            for (let ip in proxy_ip4)
+                nft_add_set_elements(table, setname, ip);
+            // return if saddr NOT in set
+            if (!nft_add_rule(table, "priority_rules", [
+                "iifname", "@" + interface_set,
+                "ip", "saddr", "!=", "@" + setname,
+                "counter", "return"
+            ]))
+                return false;
+        }
+        if (length(proxy_mac) > 0) {
+            let setname = "lan_proxy_mac";
+            // ifname-like set for ether: type ether_addr
+            run_args_quiet([ "nft", "add", "set", "inet", table, setname, "{ type ether_addr; flags interval; }" ]);
+            for (let mac in proxy_mac)
+                run_args_quiet([ "nft", "add", "element", "inet", table, setname, "{", mac, "}" ]);
+            // For MAC-only policy without IP set: clients with non-matching MAC return
+            if (length(proxy_ip4) == 0) {
+                if (!nft_add_rule(table, "priority_rules", [
+                    "iifname", "@" + interface_set,
+                    "ether", "saddr", "!=", "@" + setname,
+                    "counter", "return"
+                ]))
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    return true;
+}
+
+
+function uci_get_simple(section, key) {
+    let pipe = popen("uci -q get forkop." + section + "." + key + " 2>/dev/null", "r");
+    let v = pipe != null ? pipe.read("all") : "";
+    if (pipe != null)
+        pipe.close();
+    return trim(as_string(v));
+}
+
 
 function nft_create_runtime_base(table, localv4_set, common_set, port_set, ip_port_set, interface_set, source_interfaces, fakeip_mark, outbound_mark, fakeip_range, tproxy_port, exclude_ntp, localv6_set, common6_set, ip_port6_set, fakeip6_range, tproxy6_address) {
     localv6_set = default_arg(localv6_set, "localv6");
@@ -800,6 +1019,14 @@ function nft_create_runtime_base(table, localv4_set, common_set, port_set, ip_po
     ip_port6_set = default_arg(ip_port6_set, "forkop_ip6_ports");
     fakeip6_range = default_arg(fakeip6_range, "fc00::/18");
     tproxy6_address = default_arg(tproxy6_address, "::1");
+
+    // Economy: capture mark without FakeIP ranges (classification is IP-set based)
+    if (routing_mode_is_economy()) {
+        fakeip_mark = nft_capture_mark(fakeip_mark);
+        // Neutralize FakeIP destination matches — traffic is marked via subnet/port sets only
+        fakeip_range = "0.0.0.0/32";
+        fakeip6_range = "::1/128";
+    }
 
     if (!nft_create_table(table) ||
         !nft_create_ipv4_set(table, localv4_set) ||
@@ -813,7 +1040,8 @@ function nft_create_runtime_base(table, localv4_set, common_set, port_set, ip_po
         !nft_create_ipv6_port_set(table, ip_port6_set) ||
         !nft_create_ipv4_set(table, DNS_SOURCE_SET) ||
         !nft_create_ipv6_set(table, DNS_SOURCE6_SET) ||
-        !nft_create_ifname_set(table, interface_set))
+        !nft_create_ifname_set(table, interface_set) ||
+        !nft_create_economy_section_sets(table))
         return false;
 
     for (let interface in whitespace_values(source_interfaces))
@@ -1509,12 +1737,27 @@ function nft_create_provider_output_rules_from_uci(table, action, provider_bin, 
 function nft_create_full_runtime_from_uci(rt_table, table, localv4_set, common_set, port_set, ip_port_set, interface_set, fakeip_mark, outbound_mark, fakeip_range, tproxy_port, zapret_bin, zapret_route_mark_base, zapret_queue_base, zapret_desync_mark, zapret_desync_mark_postnat, zapret2_bin, zapret2_route_mark_base, zapret2_queue_base, zapret2_desync_mark, zapret2_desync_mark_postnat, localv6_set, common6_set, ip_port6_set, fakeip6_range, tproxy6_address) {
     log_debug("Building nftables runtime model");
 
-    return ensure_tproxy_route_rule(rt_table, fakeip_mark) &&
-        nft_create_runtime_base_from_uci(table, localv4_set, common_set, port_set, ip_port_set, interface_set, fakeip_mark, outbound_mark, fakeip_range, tproxy_port, localv6_set, common6_set, ip_port6_set, fakeip6_range, tproxy6_address) &&
-        nft_add_section_priority_rules_from_sections(uci_sections("section"), table, interface_set, localv4_set, localv6_set, fakeip_mark, fakeip_range, fakeip6_range) &&
-        nft_create_provider_output_rules_from_uci(table, "zapret", zapret_bin, zapret_route_mark_base, zapret_queue_base, zapret_desync_mark, zapret_desync_mark_postnat) &&
-        nft_create_provider_output_rules_from_uci(table, "zapret2", zapret2_bin, zapret2_route_mark_base, zapret2_queue_base, zapret2_desync_mark, zapret2_desync_mark_postnat) &&
-        nft_create_runtime_output_rules(table, localv4_set, common_set, port_set, ip_port_set, fakeip_mark, fakeip_range, localv6_set, common6_set, ip_port6_set, fakeip6_range);
+    if (!ensure_tproxy_route_rule(rt_table, fakeip_mark))
+        return false;
+    if (!nft_create_runtime_base_from_uci(table, localv4_set, common_set, port_set, ip_port_set, interface_set, fakeip_mark, outbound_mark, fakeip_range, tproxy_port, localv6_set, common6_set, ip_port6_set, fakeip6_range, tproxy6_address))
+        return false;
+    if (!nft_add_lan_client_policy(table, interface_set))
+        return false;
+        // Proxy sections only → TPROXY mark (connection/proxy/outbound)
+    if (!nft_add_section_priority_rules_from_sections(uci_sections("section"), table, interface_set, localv4_set, localv6_set, fakeip_mark, fakeip_range, fakeip6_range))
+        return false;
+    // Dynamic domain IPs (dnsmasq nftset → eco_*) → same capture mark → TPROXY
+    if (!nft_add_economy_domain_capture_rules(table, interface_set, localv4_set, localv6_set, fakeip_mark))
+        return false;
+    // Zapret/Zapret2/VPN/ByeDPI without sing-box
+    if (!direct_path.apply_all_direct_paths(table, interface_set, localv4_set, localv6_set))
+        return false;
+    // Keep output-path queue rules as safety net for marked provider traffic
+    if (!nft_create_provider_output_rules_from_uci(table, "zapret", zapret_bin, zapret_route_mark_base, zapret_queue_base, zapret_desync_mark, zapret_desync_mark_postnat))
+        return false;
+    if (!nft_create_provider_output_rules_from_uci(table, "zapret2", zapret2_bin, zapret2_route_mark_base, zapret2_queue_base, zapret2_desync_mark, zapret2_desync_mark_postnat))
+        return false;
+    return nft_create_runtime_output_rules(table, localv4_set, common_set, port_set, ip_port_set, fakeip_mark, fakeip_range, localv6_set, common6_set, ip_port6_set, fakeip6_range);
 }
 
 function nft_table_present(table) {

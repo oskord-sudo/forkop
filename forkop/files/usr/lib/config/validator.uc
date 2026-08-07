@@ -904,6 +904,10 @@ function validate_dns_settings(settings, sections, context) {
     if (!contains([ "prefer_ipv4", "ipv4_only", "prefer_ipv6", "ipv6_only" ], dns_strategy))
         fail_validation("Unsupported DNS strategy '" + dns_strategy + "'. Use prefer_ipv4, ipv4_only, prefer_ipv6, or ipv6_only. Aborted.");
 
+    let routing_mode = option(settings, "routing_mode", "precise");
+    if (!contains([ "precise", "economy", "transport", "transport-only", "lite" ], routing_mode))
+        fail_validation("Unsupported routing_mode '" + routing_mode + "'. Use precise or economy. Aborted.");
+
     let main_servers = dns_setting_values(settings, "dns_server");
     let bootstrap_servers = dns_setting_values(settings, "bootstrap_dns_server");
     if (length(main_servers) == 0)

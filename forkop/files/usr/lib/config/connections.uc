@@ -365,7 +365,7 @@ function priority_groups(section) {
 }
 
 function dashboard_filter_mode(section) {
-    return option(section, "dashboard_filter_mode", "disabled") || "disabled";
+    return option(section, "dashboard_filter_mode", "urltest") || "urltest";
 }
 
 function dashboard_detect_server_country(section) {

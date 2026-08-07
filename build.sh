@@ -41,9 +41,9 @@ APP_DESCRIPTION="Rule-based Forkop LuCI app with hybrid sing-box + zapret orches
 I18N_DESCRIPTION="Translation for luci-app-forkop - Русский (Russian)"
 MAINTAINER="ushan0v <ushan0v@users.noreply.github.com>"
 PROJECT_URL="https://github.com/ushan0v/forkop"
-BACKEND_DEPENDS_IPK="libc, ca-bundle, kmod-inet-diag, kmod-netlink-diag, kmod-tun, curl, ucode, ucode-mod-fs, ucode-mod-uci, kmod-nft-tproxy, coreutils-base64, bind-dig, nftables, kmod-nft-nat, ip-full"
-BACKEND_DEPENDS_APK="bind-dig ca-bundle coreutils-base64 curl ip-full kmod-inet-diag kmod-netlink-diag kmod-nft-nat kmod-nft-tproxy kmod-tun libc nftables ucode ucode-mod-fs ucode-mod-uci !https-dns-proxy !nextdns !luci-app-passwall !luci-app-passwall2"
-BACKEND_CONFLICTS_IPK="https-dns-proxy, nextdns, luci-app-passwall, luci-app-passwall2"
+BACKEND_DEPENDS_IPK="libc, ca-bundle, kmod-inet-diag, kmod-netlink-diag, kmod-tun, curl, ucode, ucode-mod-fs, ucode-mod-uci, kmod-nft-tproxy, coreutils-base64, bind-dig, nftables, kmod-nft-nat, ip-full, https-dns-proxy"
+BACKEND_DEPENDS_APK="bind-dig ca-bundle coreutils-base64 curl ip-full https-dns-proxy kmod-inet-diag kmod-netlink-diag kmod-nft-nat kmod-nft-tproxy kmod-tun libc nftables ucode ucode-mod-fs ucode-mod-uci !nextdns !luci-app-passwall !luci-app-passwall2"
+BACKEND_CONFLICTS_IPK="nextdns, luci-app-passwall, luci-app-passwall2"
 APP_DEPENDS_IPK="libc, luci-base, forkop"
 APP_DEPENDS_APK="libc luci-base forkop"
 
@@ -609,7 +609,7 @@ verify_apk_metadata() {
   grep -q "^  name: ${expected_package}$" "$dump_file"
   grep -q "^  version: ${expected_version}$" "$dump_file"
   if [[ "$expected_package" == "forkop" ]]; then
-    for conflict in https-dns-proxy nextdns luci-app-passwall luci-app-passwall2; do
+    for conflict in nextdns luci-app-passwall luci-app-passwall2; do
       grep -q "^[[:space:]]*- '!${conflict}'$" "$dump_file"
     done
   fi

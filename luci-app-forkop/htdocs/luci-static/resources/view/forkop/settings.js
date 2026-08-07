@@ -679,6 +679,126 @@ function createSettingsContent(section, capabilities) {
   );
   o.default = "0";
   o.rmempty = false;
+
+  /* —— clear-forkop transport policy (optional) —— */
+  o = section.option(
+    form.Flag,
+    "no_proxy_torrents",
+    _("Torrents without proxy"),
+    _(
+      "Send BitTorrent traffic direct (not through proxy/VPN). Uses protocol detection, common BT ports, and optional custom ports.",
+    ),
+  );
+  o.default = "1";
+  o.rmempty = false;
+
+  o = section.option(
+    form.DynamicList,
+    "torrent_direct_ports",
+    _("Extra BitTorrent ports"),
+    _(
+      "Additional TCP/UDP ports treated as BitTorrent and sent direct. Examples: 51413, 6881-6889. Leave empty to use defaults only (6881-6889, 51413).",
+    ),
+  );
+  o.depends("no_proxy_torrents", "1");
+  o.placeholder = "51413";
+  o.rmempty = true;
+  o.validate = function (_section_id, value) {
+    if (value == null || value === "") return true;
+    const items = Array.isArray(value) ? value : [value];
+    for (const raw of items) {
+      const v = `${raw || ""}`.trim();
+      if (!v) continue;
+      if (/^\d{1,5}$/.test(v)) {
+        const n = parseInt(v, 10);
+        if (n < 1 || n > 65535) return _("Port must be 1-65535");
+        continue;
+      }
+      if (/^\d{1,5}-\d{1,5}$/.test(v)) {
+        const [a, b] = v.split("-").map((x) => parseInt(x, 10));
+        if (a < 1 || b > 65535 || a > b) return _("Invalid port range");
+        continue;
+      }
+      return _("Use port (51413) or range (6881-6889)");
+    }
+    return true;
+  };
+
+  o = section.option(
+    form.Flag,
+    "proxy_calls",
+    _("Proxy VoIP / calls"),
+    _(
+      "Route typical call/media ports (UDP/TCP) through the first proxy section. Enable only if needed.",
+    ),
+  );
+  o.default = "0";
+  o.rmempty = false;
+
+  o = section.option(
+    form.Flag,
+    "zapret_voice",
+    _("Discord voice via direct (Zapret-friendly)"),
+    _(
+      "Prefer direct for Discord voice UDP ranges so traffic can use Zapret path when configured.",
+    ),
+  );
+  o.default = "0";
+  o.rmempty = false;
+
+  o = section.option(
+    form.ListValue,
+    "lan_proxy_mode",
+    _("LAN client policy"),
+    _(
+      "Limit which devices on the LAN are processed by Forkop routing.",
+    ),
+  );
+  o.value("disabled", _("All devices"));
+  o.value("except_listed", _("All except listed (IP/MAC)"));
+  o.value("listed_only", _("Only listed devices (IP/MAC)"));
+  o.default = "disabled";
+  o.rmempty = false;
+
+  o = section.option(
+    form.DynamicList,
+    "lan_direct_ipv4_ips",
+    _("Direct IPv4 clients"),
+    _("These clients skip proxy/VPN routing (except listed mode)."),
+  );
+  o.datatype = "ip4addr";
+  o.depends("lan_proxy_mode", "except_listed");
+  o.rmempty = true;
+
+  o = section.option(
+    form.DynamicList,
+    "lan_direct_mac_addrs",
+    _("Direct MAC clients"),
+    _("These clients skip proxy/VPN routing (except listed mode)."),
+  );
+  o.datatype = "macaddr";
+  o.depends("lan_proxy_mode", "except_listed");
+  o.rmempty = true;
+
+  o = section.option(
+    form.DynamicList,
+    "lan_proxy_ipv4_ips",
+    _("Proxied IPv4 clients"),
+    _("Only these clients are routed by Forkop (listed only mode)."),
+  );
+  o.datatype = "ip4addr";
+  o.depends("lan_proxy_mode", "listed_only");
+  o.rmempty = true;
+
+  o = section.option(
+    form.DynamicList,
+    "lan_proxy_mac_addrs",
+    _("Proxied MAC clients"),
+    _("Only these clients are routed by Forkop (listed only mode)."),
+  );
+  o.datatype = "macaddr";
+  o.depends("lan_proxy_mode", "listed_only");
+  o.rmempty = true;
 }
 
 const EntryPoint = {
