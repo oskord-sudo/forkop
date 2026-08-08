@@ -25,7 +25,6 @@ const CHECK_PROXY_IP_DOMAIN = getenv("CHECK_PROXY_IP_DOMAIN") || constants.CHECK
 const RT_TABLE_NAME = getenv("RT_TABLE_NAME") || constants.RT_TABLE_NAME || "forkop";
 const NFT_TABLE_NAME = getenv("NFT_TABLE_NAME") || constants.NFT_TABLE_NAME || "ForkopTable";
 const NFT_PROXY_MARK = getenv("NFT_PROXY_MARK") || constants.NFT_PROXY_MARK || "0x05000000";
-const NFT_PROXY_MARK = NFT_PROXY_MARK; // compat alias
 const NFT_COMMON_SET_NAME = getenv("NFT_COMMON_SET_NAME") || constants.NFT_COMMON_SET_NAME || "forkop_subnets";
 const NFT_PORT_SET_NAME = getenv("NFT_PORT_SET_NAME") || constants.NFT_PORT_SET_NAME || "forkop_ports";
 const NFT_IP_PORT_SET_NAME = getenv("NFT_IP_PORT_SET_NAME") || constants.NFT_IP_PORT_SET_NAME || "forkop_ip_ports";
@@ -1517,7 +1516,7 @@ function check_sing_box() {
     return 0;
 }
 
-function check_fakeip() /* legacy name */ {
+function check_fakeip() {
     return { fakeip: false, IP: "", IPv4: "", IPv6: "", skipped: true };
 }
 

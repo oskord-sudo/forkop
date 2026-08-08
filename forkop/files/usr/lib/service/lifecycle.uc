@@ -70,7 +70,6 @@ const NFT_IP_PORT_SET_NAME = constant_value("NFT_IP_PORT_SET_NAME", "forkop_ip_p
 const NFT_IP_PORT6_SET_NAME = constant_value("NFT_IP_PORT6_SET_NAME", "forkop_ip6_ports");
 const NFT_INTERFACE_SET_NAME = constant_value("NFT_INTERFACE_SET_NAME", "forkop_interfaces");
 const NFT_PROXY_MARK = constant_value("NFT_PROXY_MARK", "0x05000000");
-const NFT_PROXY_MARK = constant_value("NFT_PROXY_MARK", NFT_PROXY_MARK); // legacy alias for cleanup
 const NFT_OUTBOUND_MARK = constant_value("NFT_OUTBOUND_MARK", "0x08000000");
 
 const SB_TPROXY_INBOUND6_ADDRESS = constant_value("SB_TPROXY_INBOUND6_ADDRESS", "::1");

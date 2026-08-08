@@ -48,18 +48,20 @@ function forkop_section_names() {
 }
 
 function routing_mode_is_economy() {
-    
     return true;
-}
-
-    // Economy uses dedicated proxy mark when provided via env, else same mark slot
-    if (routing_mode_is_economy())
-        return getenv("NFT_PROXY_MARK") || "0x05000000";
 }
 
 function as_string(value) {
     return value == null ? "" : "" + value;
 }
+
+function nft_capture_mark(mark) {
+    // Proxy mark for TPROXY capture (economy)
+    if (routing_mode_is_economy())
+        return getenv("NFT_PROXY_MARK") || "0x05000000";
+    return as_string(mark);
+}
+
 
 function arg_bool(value) {
     value = lc(as_string(value));
