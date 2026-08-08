@@ -120,7 +120,7 @@ function uci_enabled_sections() {
     if (!uci_core.available())
         return result;
     // shell list
-    let pipe = popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | grep '=section$' | cut -d. -f2 | cut -d= -f1", "r");
+    let pipe = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | grep '=section$' | cut -d. -f2 | cut -d= -f1", "r");
     let raw = pipe != null ? pipe.read("all") : "";
     if (pipe != null)
         pipe.close();
@@ -224,7 +224,7 @@ function apply_vpn_interface_routing(table, interface_set, localv4, localv6) {
         let ifaces = [];
         // load interfaces from UCI
         let name = section[".name"];
-        let pipe = popen("uci -q get " + CONFIG_NAME + "." + name + ".interface 2>/dev/null; uci -q get " + CONFIG_NAME + "." + name + ".interfaces 2>/dev/null", "r");
+        let pipe = fs.popen("uci -q get " + CONFIG_NAME + "." + name + ".interface 2>/dev/null; uci -q get " + CONFIG_NAME + "." + name + ".interfaces 2>/dev/null", "r");
         let raw = pipe != null ? pipe.read("all") : "";
         if (pipe != null)
             pipe.close();
@@ -234,9 +234,9 @@ function apply_vpn_interface_routing(table, interface_set, localv4, localv6) {
                 push(ifaces, iface);
         }
         // section_interface children
-        pipe = popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | grep 'section_interface.*name=' | head -50", "r");
+        pipe = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | grep 'section_interface.*name=' | head -50", "r");
         // simpler: list_option style via uci show
-        pipe = popen("uci -q each " + CONFIG_NAME + " 2>/dev/null", "r");
+        pipe = fs.popen("uci -q each " + CONFIG_NAME + " 2>/dev/null", "r");
         if (pipe != null)
             pipe.close();
 

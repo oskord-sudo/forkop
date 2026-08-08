@@ -487,6 +487,7 @@ function fail_outbound_detour(message) {
 }
 
 function fail_validation(message) {
+    log_message(as_string(message), "error");
     print(message, "\n");
     exit(1);
 }
@@ -896,61 +897,8 @@ function dns_setting_values(settings, key) {
 }
 
 function validate_dns_settings(settings, sections, context) {
-    let dns_type = option(settings, "dns_type", "udp");
-    if (!contains([ "udp", "dot", "doh" ], dns_type))
-        fail_validation("Unsupported DNS protocol type '" + dns_type + "'. Use udp, dot, or doh. Aborted.");
-
-    let dns_strategy = option(settings, "dns_strategy", "prefer_ipv4");
-    if (!contains([ "prefer_ipv4", "ipv4_only", "prefer_ipv6", "ipv6_only" ], dns_strategy))
-        fail_validation("Unsupported DNS strategy '" + dns_strategy + "'. Use prefer_ipv4, ipv4_only, prefer_ipv6, or ipv6_only. Aborted.");
-
-    let routing_mode = option(settings, "routing_mode", "precise");
-    if (!contains([ "precise", "economy", "transport", "transport-only", "lite" ], routing_mode))
-        fail_validation("Unsupported routing_mode '" + routing_mode + "'. Use precise or economy. Aborted.");
-
-    let main_servers = dns_setting_values(settings, "dns_server");
-    let bootstrap_servers = dns_setting_values(settings, "bootstrap_dns_server");
-    if (length(main_servers) == 0)
-        fail_validation("At least one main DNS server is required. Aborted.");
-    if (length(bootstrap_servers) == 0)
-        fail_validation("At least one Bootstrap DNS server is required. Aborted.");
-    for (let value in main_servers)
-        if (!dns_server_value_valid(value))
-            fail_validation("Invalid main DNS server '" + value + "'. Aborted.");
-    for (let value in bootstrap_servers)
-        if (!dns_server_value_valid(value))
-            fail_validation("Invalid Bootstrap DNS server '" + value + "'. Aborted.");
-
-    if (length(main_servers) > 1 || length(bootstrap_servers) > 1) {
-        validate_required_duration_option(option(settings, "dns_check_interval", "10s"), "settings.dns_check_interval");
-        validate_required_duration_option(option(settings, "dns_recovery_check_interval", "60s"), "settings.dns_recovery_check_interval");
-        validate_required_duration_option(option(settings, "dns_check_timeout", "2s"), "settings.dns_check_timeout");
-    }
-
-    if (!bool_option(settings, "dns_detour_enabled", false))
-        return;
-
-    let target_name = option(settings, "dns_detour_section", "");
-    if (target_name == "")
-        fail_validation("DNS through a section is enabled, but no section is selected. Aborted.");
-
-    let target = null;
-    for (let section in sections)
-        if (section_name(section) == target_name) {
-            target = {
-                section: target_name,
-                enabled: section_enabled(section),
-                action: rule_action(section)
-            };
-            break;
-        }
-
-    if (target == null)
-        fail_validation("DNS through a section references missing rule '" + target_name + "'. Aborted.");
-    if (!target.enabled)
-        fail_validation("DNS through a section references disabled rule '" + target_name + "'. Aborted.");
-    if (!download_section_action_available(target.action, context.byedpi_installed, context.zapret_installed, context.zapret2_installed))
-        fail_validation("DNS through a section references rule '" + target_name + "' with unsupported action '" + target.action + "'. Select an enabled Connection, VPN, Zapret, Zapret2, or ByeDPI section. Aborted.");
+    // System DNS is https-dns-proxy / OpenWrt — not validated as Forkop settings
+    return;
 }
 
 function normalize_port_number_value(value) {
@@ -1031,7 +979,8 @@ function validate_urltest_filter_mode_value(value, section) {
 }
 
 function validate_dashboard_filter_mode_value(value, section) {
-    if (as_string(value) == "" || contains([ "disabled", "exclude", "include", "mixed" ], value))
+    // "urltest" = dashboard follows URLTest groups (clear-forkop unified mode)
+    if (as_string(value) == "" || contains([ "disabled", "exclude", "include", "mixed", "urltest" ], value))
         return;
 
     fail_validation("Invalid dashboard filter mode '" + value + "' in rule '" + section + "'. Aborted.");
@@ -1186,7 +1135,7 @@ function validate_dashboard_filter(section) {
     let name = section_name(section);
     let filter_mode = connections.dashboard_filter_mode(section);
     validate_dashboard_filter_mode_value(filter_mode, name);
-    if (filter_mode == "disabled")
+    if (filter_mode == "disabled" || filter_mode == "urltest")
         return;
 
     validate_detect_server_country_value(connections.dashboard_detect_server_country(section), name);

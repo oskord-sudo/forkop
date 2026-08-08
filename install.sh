@@ -788,6 +788,8 @@ function installer_remove_package_prefix(prefix) {
 }
 
 function installer_confirm_remove_https_dns_proxy() {
+    // https-dns-proxy is required for system DNS — never remove it; always continue install
+    return true;
     if (!installer_package_installed("https-dns-proxy"))
         return true;
 
@@ -1051,11 +1053,10 @@ function installer_cleanup_legacy() {
     }
 
     let packages_removed = true;
-    for (let package_name in [ "luci-app-https-dns-proxy", "https-dns-proxy" ])
+    for (let package_name in [ ]) // never remove https-dns-proxy
         if (!installer_remove_package(package_name))
             packages_removed = false;
-    if (!installer_remove_package_prefix("luci-i18n-https-dns-proxy"))
-        packages_removed = false;
+    // keep luci-i18n-https-dns-proxy if present
 
     if (legacy_installed) {
         if (!installer_remove_package_prefix("luci-i18n-" + LEGACY_BACKEND_PACKAGE))
@@ -1788,6 +1789,33 @@ select_sing_box_installation() {
     done
 }
 
+
+install_dns_dependencies() {
+    msg "Ensuring https-dns-proxy is installed (system DNS; Forkop does not manage DHCP)"
+    if pkg_is_installed "https-dns-proxy"; then
+        msg "https-dns-proxy already installed"
+    else
+        if ! pkg_install "https-dns-proxy"; then
+            warn "Failed to install https-dns-proxy — install it manually"
+        fi
+    fi
+    if pkg_is_installed "luci-app-https-dns-proxy" || pkg_is_installed "luci-app-https-dns-proxy"; then
+        true
+    else
+        pkg_install "luci-app-https-dns-proxy" 2>/dev/null || warn "luci-app-https-dns-proxy not installed"
+    fi
+    # Russian i18n when installer language is ru
+    case "$INSTALLER_LANG" in
+        ru|ru_*)
+            pkg_install "luci-i18n-https-dns-proxy-ru" 2>/dev/null || true
+            ;;
+    esac
+    if [ -x /etc/init.d/https-dns-proxy ]; then
+        /etc/init.d/https-dns-proxy enable >/dev/null 2>&1 || true
+        /etc/init.d/https-dns-proxy start >/dev/null 2>&1 || /etc/init.d/https-dns-proxy restart >/dev/null 2>&1 || true
+    fi
+}
+
 install_selected_sing_box() {
     action=""
     output_file="$TMP_DIR/sing-box-component-action.json"
@@ -1980,6 +2008,7 @@ main() {
     install_backend_package
     migrate_legacy_configuration
     install_ui_packages
+    install_dns_dependencies
     install_selected_sing_box
     post_install
 

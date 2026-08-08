@@ -19,6 +19,34 @@ let list_option = common.list_option;
 let bool_option = common.bool_option;
 
 
+
+function forkop_section_option(section, key) {
+    return as_string(uci_core.get(CONFIG_NAME + "." + as_string(section) + "." + as_string(key)));
+}
+
+function forkop_section_names() {
+
+    let names = [];
+    let cursor = null;
+    try {
+        cursor = uci_core.cursor();
+    } catch (e) {
+        return names;
+    }
+    if (cursor == null)
+        return names;
+    cursor.load(CONFIG_NAME);
+    let all = cursor.get_all(CONFIG_NAME);
+    if (all == null)
+        return names;
+    for (let name in all) {
+        let sec = all[name];
+        if (sec != null && as_string(sec[".type"]) == "section" && as_string(name) != "settings")
+            push(names, as_string(name));
+    }
+    return names;
+}
+
 function routing_mode_is_economy() {
     // FakeIP fully removed — always real-IP / economy datapath
     return true;
@@ -830,22 +858,13 @@ function nft_add_section_priority_rules_from_sections(sections, table, interface
 function nft_create_economy_section_sets(table) {
     if (!routing_mode_is_economy())
         return true;
-    // Dynamic domain→IP sets filled by dnsmasq nftset= (timeout, not static bulk load)
     let timeout = getenv("FORKOP_NFTSET_TIMEOUT") || "1h";
-    let pipe = popen("uci -q show forkop 2>/dev/null | grep '=section$' | cut -d. -f2 | cut -d= -f1", "r");
-    let raw = pipe != null ? pipe.read("all") : "";
-    if (pipe != null)
-        pipe.close();
-    for (let name in split(as_string(raw), "\n")) {
-        name = trim(name);
-        if (name == "" || name == "settings")
-            continue;
-        let safe = replace(name, /[^A-Za-z0-9_]/g, "_");
+    for (let name in forkop_section_names()) {
+        let safe = replace(as_string(name), /[^A-Za-z0-9_]/g, "_");
         if (length(safe) > 40)
             safe = substr(safe, 0, 40);
         let set4 = "eco_" + safe + "_v4";
         let set6 = "eco_" + safe + "_v6";
-        // interval+timeout: DNS adds single IPs; CIDR can still be merged manually
         if (!nft_create_set(table, set4, "{ type ipv4_addr; flags interval,timeout; timeout " + timeout + "; auto-merge; }") ||
             !nft_create_set(table, set6, "{ type ipv6_addr; flags interval,timeout; timeout " + timeout + "; auto-merge; }"))
             return false;
@@ -861,49 +880,18 @@ function nft_add_economy_domain_capture_rules(table, interface_set, localv4_set,
     if (!routing_mode_is_economy())
         return true;
     interface_set = as_string(interface_set || "forkop_interfaces");
-    localv4_set = as_string(localv4_set || "localv4");
-    localv6_set = as_string(localv6_set || "localv6");
     mark = as_string(mark);
-
-    let pipe = popen("uci -q show forkop 2>/dev/null | grep '=section$' | cut -d. -f2 | cut -d= -f1", "r");
-    let raw = pipe != null ? pipe.read("all") : "";
-    if (pipe != null)
-        pipe.close();
-
-    for (let name in split(as_string(raw), "\n")) {
-        name = trim(name);
-        if (name == "" || name == "settings")
-            continue;
-        let enabled = as_string(uci_get_simple(name, "enabled"));
-        if (enabled == "0" || enabled == "false")
-            continue;
-        let action = as_string(uci_get_simple(name, "action"));
-        // Only TPROXY backends use the shared proxy capture mark via eco sets
-        if (action != "connection" && action != "proxy" && action != "outbound" && action != "block")
-            continue;
-
-        let safe = replace(name, /[^A-Za-z0-9_]/g, "_");
+    for (let name in forkop_section_names()) {
+        let safe = replace(as_string(name), /[^A-Za-z0-9_]/g, "_");
         if (length(safe) > 40)
             safe = substr(safe, 0, 40);
         let set4 = "eco_" + safe + "_v4";
         let set6 = "eco_" + safe + "_v6";
-
-        if (action == "block") {
-            // drop can be added later; for now mark like capture
-        }
-        if (!nft_add_rule(table, "priority_rules", [
-            "iifname", "@" + interface_set,
-            "ip", "daddr", "@" + set4,
-            "ip", "daddr", "!=", "@" + localv4_set,
-            "meta", "mark", "set", mark, "counter"
-        ]))
+        if (!nft_add_rule(table, "prerouting",
+                "iifname @" + interface_set + " ip daddr @" + set4 + " meta mark set " + mark + " counter"))
             return false;
-        if (!nft_add_rule(table, "priority_rules", [
-            "iifname", "@" + interface_set,
-            "ip6", "daddr", "@" + set6,
-            "ip6", "daddr", "!=", "@" + localv6_set,
-            "meta", "mark", "set", mark, "counter"
-        ]))
+        if (!nft_add_rule(table, "prerouting",
+                "iifname @" + interface_set + " ip6 daddr @" + set6 + " meta mark set " + mark + " counter"))
             return false;
     }
     return true;
@@ -1005,7 +993,7 @@ function nft_add_lan_client_policy(table, interface_set) {
 
 
 function uci_get_simple(section, key) {
-    let pipe = popen("uci -q get forkop." + section + "." + key + " 2>/dev/null", "r");
+    let pipe = null;
     let v = pipe != null ? pipe.read("all") : "";
     if (pipe != null)
         pipe.close();

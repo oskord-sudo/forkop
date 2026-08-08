@@ -124,7 +124,7 @@ function generate_nftset_conf() {
     let sections = [];
     if (uci.available()) {
         // load sections via uci show parse
-        let pipe = popen("uci -q show " + CONFIG_NAME + " 2>/dev/null", "r");
+        let pipe = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null", "r");
         let raw = pipe != null ? pipe.read("all") : "";
         if (pipe != null)
             pipe.close();
@@ -140,7 +140,7 @@ function generate_nftset_conf() {
 
     // Use uci export of each section via system
     let names_out = "";
-    let p = popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | sed -n \"s/^" + CONFIG_NAME + "\\.\\([^=]*\\)=section$/\\1/p\"", "r");
+    let p = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | sed -n \"s/^" + CONFIG_NAME + "\\.\\([^=]*\\)=section$/\\1/p\"", "r");
     if (p != null) {
         names_out = p.read("all");
         p.close();
@@ -155,7 +155,7 @@ function generate_nftset_conf() {
 
     // Fallback: parse type=section
     if (length(section_names) == 0) {
-        p = popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | grep \"=section$\" | cut -d. -f2 | cut -d= -f1", "r");
+        p = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | grep \"=section$\" | cut -d. -f2 | cut -d= -f1", "r");
         if (p != null) {
             names_out = p.read("all");
             p.close();
@@ -191,7 +191,7 @@ function generate_nftset_conf() {
                 add_dom(v);
         }
         // list items may appear as domain_suffix= multiple times in show
-        p = popen("uci -q get " + CONFIG_NAME + "." + name + ".domain 2>/dev/null; uci -q get " + CONFIG_NAME + "." + name + ".domain_suffix 2>/dev/null", "r");
+        p = fs.popen("uci -q get " + CONFIG_NAME + "." + name + ".domain 2>/dev/null; uci -q get " + CONFIG_NAME + "." + name + ".domain_suffix 2>/dev/null", "r");
         if (p != null) {
             let got = p.read("all");
             p.close();

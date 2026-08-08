@@ -535,16 +535,20 @@ function dnsmasq_has_forkop_managed_state() {
 
 function validate_start_config() {
     let status = module_status(VALIDATOR_UC, [ "check-requirements" ]);
-    if (status != 0)
+    if (status != 0) {
+        log_message("Runtime requirements check failed (exit " + as_string(status) + "). Aborted.", "fatal");
         return status;
+    }
 
     status = module_status(SERVER_UC, [ "prepare-all-defaults" ]);
-    if (status != 0)
+    if (status != 0) {
+        log_message("Server defaults prepare failed (exit " + as_string(status) + "). Aborted.", "fatal");
         return status;
+    }
 
     status = module_status(VALIDATOR_UC, [ "validate-runtime" ]);
     if (status != 0) {
-        log_message("Runtime config validation failed. Aborted.", "fatal");
+        log_message("Runtime config validation failed (exit " + as_string(status) + "). Aborted.", "fatal");
         return status;
     }
 

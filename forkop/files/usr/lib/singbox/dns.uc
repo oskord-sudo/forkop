@@ -1,5 +1,7 @@
 #!/usr/bin/env ucode
 
+let fs = require("fs");
+
 let common = require("core.common");
 let core_ip = require("core.ip");
 let runtime_constants = require("singbox.constants");
@@ -44,13 +46,60 @@ function detour_tag(settings) {
     return section_name == "" ? "" : runtime_constants.outbound_tag(section_name);
 }
 
+
+function https_dns_proxy_upstreams() {
+    // Auto-detect ALL https-dns-proxy instances (any count / any ports)
+    let result = [];
+    let seen = {};
+    try {
+        let hdp = require("dns.https_dns_proxy");
+        if (hdp != null && hdp.dnsmasq_upstream_servers != null) {
+            for (let entry in hdp.dnsmasq_upstream_servers()) {
+                entry = as_string(entry);
+                if (entry != "" && !seen[entry]) {
+                    seen[entry] = true;
+                    push(result, entry);
+                }
+            }
+        }
+    } catch (e) {
+        // module missing
+    }
+    return result;
+}
+
+function default_dns_servers() {
+    let servers = https_dns_proxy_upstreams();
+    if (length(servers) > 0)
+        return servers;
+    return [ "127.0.0.1#5053" ];
+}
+
 function state_template(settings) {
+    let main_servers = [];
+    for (let value in list_option(settings, "dns_server")) {
+        value = trim(as_string(value));
+        if (value != "")
+            push(main_servers, value);
+    }
+    if (length(main_servers) == 0)
+        main_servers = default_dns_servers();
+
+    let bootstrap_servers = [];
+    for (let value in list_option(settings, "bootstrap_dns_server")) {
+        value = trim(as_string(value));
+        if (value != "")
+            push(bootstrap_servers, value);
+    }
+    if (length(bootstrap_servers) == 0)
+        bootstrap_servers = default_dns_servers();
+
     return {
         version: 1,
         dns_type: option(settings, "dns_type", "udp"),
         dns_detour: detour_tag(settings),
-        main_servers: server_list(settings, "dns_server", "77.88.8.8"),
-        bootstrap_servers: server_list(settings, "bootstrap_dns_server", "77.88.8.8"),
+        main_servers,
+        bootstrap_servers,
         main_index: 0,
         bootstrap_index: 0
     };
