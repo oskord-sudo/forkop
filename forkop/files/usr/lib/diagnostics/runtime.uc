@@ -22,10 +22,10 @@ const TMP_RULESET_FOLDER = getenv("TMP_RULESET_FOLDER") || constants.TMP_RULESET
 const TMP_SUBSCRIPTION_FOLDER = getenv("TMP_SUBSCRIPTION_FOLDER") || constants.TMP_SUBSCRIPTION_FOLDER || TMP_SING_BOX_FOLDER + "/subscriptions";
 const SECTION_CACHE_DIR = getenv("FORKOP_SECTION_CACHE_DIR") || RUNTIME_STATE_DIR + "/section-cache";
 const CHECK_PROXY_IP_DOMAIN = getenv("CHECK_PROXY_IP_DOMAIN") || constants.CHECK_PROXY_IP_DOMAIN || "ip.podkop.fyi";
-const FAKEIP_TEST_DOMAIN = getenv("FAKEIP_TEST_DOMAIN") || constants.FAKEIP_TEST_DOMAIN || "fakeip.podkop.fyi";
 const RT_TABLE_NAME = getenv("RT_TABLE_NAME") || constants.RT_TABLE_NAME || "forkop";
 const NFT_TABLE_NAME = getenv("NFT_TABLE_NAME") || constants.NFT_TABLE_NAME || "ForkopTable";
-const NFT_FAKEIP_MARK = getenv("NFT_FAKEIP_MARK") || constants.NFT_FAKEIP_MARK || "0x04000000";
+const NFT_PROXY_MARK = getenv("NFT_PROXY_MARK") || constants.NFT_PROXY_MARK || "0x05000000";
+const NFT_PROXY_MARK = NFT_PROXY_MARK; // compat alias
 const NFT_COMMON_SET_NAME = getenv("NFT_COMMON_SET_NAME") || constants.NFT_COMMON_SET_NAME || "forkop_subnets";
 const NFT_PORT_SET_NAME = getenv("NFT_PORT_SET_NAME") || constants.NFT_PORT_SET_NAME || "forkop_ports";
 const NFT_IP_PORT_SET_NAME = getenv("NFT_IP_PORT_SET_NAME") || constants.NFT_IP_PORT_SET_NAME || "forkop_ip_ports";
@@ -1174,7 +1174,7 @@ function get_sing_box_status() {
 
 function get_status() {
     let running = module_success(SERVICE_STATE_UC, [
-        "forkop-stably-running", RT_TABLE_NAME, NFT_TABLE_NAME, NFT_FAKEIP_MARK, RUNTIME_STABLE_MIN_AGE
+        "forkop-stably-running", RT_TABLE_NAME, NFT_TABLE_NAME, NFT_PROXY_MARK, RUNTIME_STABLE_MIN_AGE
     ]) ? 1 : 0;
     let enabled = file_executable("/etc/rc.d/S99" + FORKOP_SERVICE_NAME) ? 1 : 0;
     let dns_configured = dnsmasq_has_forkop_dns() ? 1 : 0;
@@ -1319,7 +1319,7 @@ function dns_check_timeout_seconds(value) {
 }
 
 function check_dns_available() {
-    // System DNS is owned by dnsmasq / https-dns-proxy — not Forkop FakeIP
+    // System DNS is owned by dnsmasq / https-dns-proxy — not managed by Forkop
     let domain = "example.com";
     let timeout_seconds = 2;
     let dns_status = 0;
@@ -1394,7 +1394,7 @@ function nft_table_has_other_mark_rules(family, table_name) {
 function check_nft_rules() {
     command_status("sh -c " + shell_quote(
         "curl -m 3 -s " + shell_quote("https://" + CHECK_PROXY_IP_DOMAIN + "/check") + " >/dev/null 2>&1 & pid1=$!; " +
-        "curl -m 3 -s " + shell_quote("https://" + FAKEIP_TEST_DOMAIN + "/check") + " >/dev/null 2>&1 & pid2=$!; " +
+        "curl -m 3 -s " + shell_quote("https://" + "example.com" + "/check") + " >/dev/null 2>&1 & pid2=$!; " +
         "wait $pid1 2>/dev/null; wait $pid2 2>/dev/null; sleep 1"
     ));
 
@@ -1517,7 +1517,7 @@ function check_sing_box() {
     return 0;
 }
 
-function check_fakeip() {
+function check_fakeip() /* legacy name */ {
     return { fakeip: false, IP: "", IPv4: "", IPv6: "", skipped: true };
 }
 
@@ -1847,13 +1847,7 @@ function global_check(arg1, arg2) {
     }
 
     print_global("━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    print_global("🥸 FakeIP status");
-    let fakeip_check_json = command_capture(command_from_args(module_args(LIB_DIR + "/diagnostics/runtime.uc", [ "check-fakeip" ]))).output;
-    if (fakeip_check_json != "")
-        render_or_fail([ "global-fakeip-check" ], fakeip_check_json, "❌ Failed to parse FakeIP info", [ 0 ]);
-    else
-        print_global("❌ Failed to get FakeIP info");
-
+    
     return 0;
 }
 

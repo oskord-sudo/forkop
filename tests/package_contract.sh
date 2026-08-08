@@ -77,7 +77,8 @@ grep -Fq "replace('\\\\n', '\\n')" "$BUILD_WORKFLOW" ||
 grep -Fq 'body: ${{ needs.preparation.outputs.release_notes }}' "$BUILD_WORKFLOW" ||
   fail "release action must receive normalized Markdown notes"
 
-for conflict in https-dns-proxy nextdns luci-app-passwall luci-app-passwall2; do
+# clear-forkop: https-dns-proxy is a peer, not a conflict
+for conflict in nextdns luci-app-passwall luci-app-passwall2; do
   grep -E 'CONFLICTS:=' "$FORKOP_MAKEFILE" | grep -Fq "$conflict" ||
     fail "forkop/Makefile conflicts are missing $conflict"
   grep -E '^BACKEND_CONFLICTS_IPK=' "$BUILD_SCRIPT" | grep -Fq "$conflict" ||

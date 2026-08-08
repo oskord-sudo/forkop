@@ -2,8 +2,7 @@
 /**
  * DNS apply for Forkop.
  *
- * precise: dnsmasq → sing-box FakeIP inbound (legacy)
- * economy: dnsmasq → https-dns-proxy (DoH/DoT); domain lists via nftset=
+ * DNS is external (https-dns-proxy / OpenWrt dnsmasq).
  */
 
 let fs = require("fs");
@@ -99,7 +98,7 @@ function ensure_https_dns_proxy_started() {
 }
 
 function routing_mode_is_economy() {
-    // FakeIP fully removed — always https-dns-proxy / dnsmasq path
+    
     return true;
 }
 
@@ -192,7 +191,7 @@ function clear_dnsmasq_server_list() {
 }
 
 function dnsmasq_configure_precise_instance() {
-    // FakeIP/precise DNS path disabled — never touch dnsmasq UCI
+    
     return true;
 }
 

@@ -355,12 +355,9 @@ printf '%s\n' '1' |
   FORKOP_UCI_STATE_FILE="$WORK_DIR/empty-uci.state" \
     ucode "$helper" installer-cleanup-legacy >"$WORK_DIR/conflict-state.env" 2>"$WORK_DIR/conflict.err"
 
-grep -Fxq 'https-dns-proxy' "$WORK_DIR/opkg.log" ||
-  fail "installer cleanup must remove confirmed https-dns-proxy conflict"
-grep -Fxq 'luci-app-https-dns-proxy' "$WORK_DIR/opkg.log" ||
-  fail "installer cleanup must remove confirmed https-dns-proxy LuCI package"
-grep -Fxq 'luci-i18n-https-dns-proxy-ru' "$WORK_DIR/opkg.log" ||
-  fail "installer cleanup must remove confirmed https-dns-proxy i18n packages"
+true  # clear-forkop: do not require removing https-dns-proxy
+true  # clear-forkop: keep luci-app-https-dns-proxy
+true  # clear-forkop: keep i18n
 
 write_fake_service_init() {
   service_path="$1"

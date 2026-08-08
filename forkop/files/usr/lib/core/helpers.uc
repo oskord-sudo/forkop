@@ -3,11 +3,7 @@
 let fs = require("fs");
 
 const SB_DNS_SERVER_TAG = getenv("SB_DNS_SERVER_TAG") || "dns-server";
-const SB_FAKEIP_DNS_SERVER_TAG = getenv("SB_FAKEIP_DNS_SERVER_TAG") || "fakeip-server";
 const SB_BOOTSTRAP_SERVER_TAG = getenv("SB_BOOTSTRAP_SERVER_TAG") || "bootstrap-dns-server";
-const SB_FAKEIP_DNS_RULE_TAG = getenv("SB_FAKEIP_DNS_RULE_TAG") || "fakeip-dns-rule-tag";
-const SB_FAKEIP_RULESET_DNS_RULE_TAG = getenv("SB_FAKEIP_RULESET_DNS_RULE_TAG") || "fakeip-ruleset-dns-rule-tag";
-const SB_SERVICE_FAKEIP_DNS_RULE_TAG = getenv("SB_SERVICE_FAKEIP_DNS_RULE_TAG") || "service-fakeip-dns-rule-tag";
 const SB_TPROXY_INBOUND_TAG = getenv("SB_TPROXY_INBOUND_TAG") || "tproxy-in";
 const SB_TPROXY_INBOUND6_TAG = getenv("SB_TPROXY_INBOUND6_TAG") || "tproxy6-in";
 const SB_DNS_INBOUND_TAG = getenv("SB_DNS_INBOUND_TAG") || "dns-in";
@@ -510,11 +506,7 @@ function allocate_runtime_tag_value(base, postfix, reserved) {
 function default_reserved_runtime_tags() {
     return [
         SB_DNS_SERVER_TAG,
-        SB_FAKEIP_DNS_SERVER_TAG,
         SB_BOOTSTRAP_SERVER_TAG,
-        SB_FAKEIP_DNS_RULE_TAG,
-        SB_FAKEIP_RULESET_DNS_RULE_TAG,
-        SB_SERVICE_FAKEIP_DNS_RULE_TAG,
         SB_TPROXY_INBOUND_TAG,
         SB_TPROXY_INBOUND6_TAG,
         SB_DNS_INBOUND_TAG,

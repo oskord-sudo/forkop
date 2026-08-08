@@ -50,7 +50,6 @@ let url_query_params = runtime_url.query_params;
 const CONFIG_NAME = "forkop";
 
 function is_economy_settings(settings) {
-    // FakeIP removed: always transport-only / real-IP path
     return true;
 }
 
@@ -2487,7 +2486,6 @@ function push_dns_matcher_rule(config, rule) {
 function section_dns_server(section) {
     return option(section, "action", "") == "bypass"
         ? runtime_constants.DNS_SERVER_TAG
-        : runtime_constants.FAKEIP_DNS_SERVER_TAG;
 }
 
 function single_or_array(values) {
@@ -2516,7 +2514,6 @@ function add_source_aware_bypass_dns_rules(config, matchers, rewrite_ttl) {
         rules: [
             copy_dns_matchers(matchers),
             {
-                ip_cidr: [ runtime_constants.FAKEIP_INET4_RANGE, runtime_constants.FAKEIP_INET6_RANGE ],
                 invert: true
             }
         ],

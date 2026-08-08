@@ -1247,15 +1247,13 @@ function write_sing_box_check_json(sing_box_installed, sing_box_version_ok, sing
     });
 }
 
-function write_fakeip_check_json(fakeip_status, fakeip_address) {
-    write_json({
-        fakeip: arg_bool(fakeip_status),
-        IP: as_string(fakeip_address)
-    });
+function write_fakeip_check_json() {
+    write_json({ skipped: true });
 }
 
-function fakeip_address_status(address) {
-    print(match(as_string(address), /^198\.(18|19)\./) != null ? "true\n" : "false\n");
+function fakeip_address_status() {
+    print("skipped
+");
 }
 
 function repeat_char(char, count) {
@@ -1397,7 +1395,7 @@ function render_global_system_info() {
 }
 
 function render_global_fakeip_check() {
-    print_line("\u2139\ufe0f FakeIP is not used (system DNS is outside Forkop, e.g. https-dns-proxy)");
+    print_line("\u2139\ufe0f DNS is managed outside Forkop (https-dns-proxy / dnsmasq)");
 }
 
 function render_global_dns_check(dont_touch_dhcp) {

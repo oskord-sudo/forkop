@@ -957,7 +957,7 @@ async function withTimeout(promise, timeoutMs, operationName, timeoutMessage = _
 var FORKOP_UCI_PACKAGE = "forkop";
 var FORKOP_LUCI_APP_VERSION = "__COMPILED_VERSION_VARIABLE__";
 var FORKOP_ACTION_PROVIDERS_AVAILABILITY_EVENT = "forkop:action-providers-availability";
-var FAKEIP_CHECK_DOMAIN = "fakeip.podkop.fyi";
+var FAKEIP_CHECK_DOMAIN = ""; // FakeIP removed
 var IP_CHECK_DOMAIN = "ip.podkop.fyi";
 var DEFAULT_LATENCY_TEST_URL = "https://www.gstatic.com/generate_204";
 var LATENCY_TEST_URL_OPTIONS = [
@@ -2354,12 +2354,8 @@ async function getConfigSections() {
 // src/forkop/runtimeTags.ts
 var RESERVED_RUNTIME_TAGS = /* @__PURE__ */ new Set([
   "dns-server",
-  "fakeip-server",
-  "bootstrap-dns-server",
-  "fakeip-dns-rule-tag",
-  "fakeip-ruleset-dns-rule-tag",
-  "service-fakeip-dns-rule-tag",
-  "tproxy-in",
+    "bootstrap-dns-server",
+        "tproxy-in",
   "tproxy6-in",
   "dns-in",
   "service-mixed-in",
@@ -4075,16 +4071,7 @@ async function createBaseApiRequest(fetchFn, options) {
 
 // src/forkop/methods/fakeip/getFakeIpCheck.ts
 async function getFakeIpCheck() {
-  return createBaseApiRequest(
-    () => fetch(`https://${FAKEIP_CHECK_DOMAIN}/check`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" }
-    }),
-    {
-      operationName: "getFakeIpCheck",
-      timeoutMs: 5e3
-    }
-  );
+  return { success: true, data: { fakeip: false, IP: "" }, message: "removed" };
 }
 
 // src/forkop/methods/fakeip/getIpCheck.ts
@@ -4220,7 +4207,7 @@ var DIAGNOSTICS_CHECKS_MAP = {
   },
   ["FAKEIP" /* FAKEIP */]: {
     order: 9,
-    title: getCheckTitle("FakeIP"),
+    title: getCheckTitle("DNS"),
     code: "FAKEIP" /* FAKEIP */
   },
   ["INBOUNDS" /* INBOUNDS */]: {
@@ -4257,7 +4244,7 @@ function getDiagnosticsChecks(description, options = {}) {
   if (options.includeByedpi) {
     checks.push("BYEDPI" /* BYEDPI */);
   }
-  checks.push("OUTBOUNDS" /* OUTBOUNDS */, "FAKEIP" /* FAKEIP */);
+  checks.push("OUTBOUNDS" /* OUTBOUNDS */); // FAKEIP removed
   return checks.map((code) => createDiagnosticCheck(code, description));
 }
 function getLoadingDiagnosticsChecks(options = {}) {
@@ -7926,8 +7913,8 @@ async function runNftCheck() {
     state: "loading",
     items: []
   });
-  await RemoteFakeIPMethods.getFakeIpCheck();
-  await RemoteFakeIPMethods.getIpCheck();
+  // FakeIP remote checks removed
+
   const nftablesChecks = await ForkopShellMethods.checkNftRules();
   if (!nftablesChecks.success) {
     updateCheckStore({
@@ -8000,63 +7987,14 @@ async function runNftCheck() {
 
 // src/forkop/tabs/diagnostic/checks/runFakeIPCheck.ts
 async function runFakeIPCheck() {
-  const { order, title, code } = DIAGNOSTICS_CHECKS_MAP.FAKEIP;
-  updateCheckStore({
-    order,
-    code,
-    title,
-    description: _("Checking, please wait"),
-    state: "loading",
+  return {
+    order: 99,
+    title: "FakeIP",
+    code: "FAKEIP",
+    state: "skipped",
+    description: "FakeIP removed from clear-forkop",
     items: []
-  });
-  const routerFakeIPResponse = await ForkopShellMethods.checkFakeIP();
-  const checkFakeIPResponse = await RemoteFakeIPMethods.getFakeIpCheck();
-  const checkIPResponse = await RemoteFakeIPMethods.getIpCheck();
-  const browserFakeIPCheckUnavailable = !checkFakeIPResponse.success;
-  const browserFakeIPCheckMessage = checkFakeIPResponse.success ? "" : checkFakeIPResponse.message;
-  const checks = {
-    singBoxFakeIP: routerFakeIPResponse.success && routerFakeIPResponse.data.fakeip,
-    browserFakeIP: checkFakeIPResponse.success && checkFakeIPResponse.data.fakeip,
-    canComparePublicIP: checkFakeIPResponse.success && checkIPResponse.success,
-    differentIP: checkFakeIPResponse.success && checkIPResponse.success && checkFakeIPResponse.data.IP !== checkIPResponse.data.IP
   };
-  const fakeIPWorks = checks.singBoxFakeIP && checks.browserFakeIP;
-  const { state, description } = fakeIPWorks ? checks.differentIP ? { state: "success", description: _("Checks passed") } : {
-    state: "warning",
-    description: _("FakeIP works; public IP comparison is inconclusive")
-  } : browserFakeIPCheckUnavailable && checks.singBoxFakeIP ? {
-    state: "warning",
-    description: _("Browser FakeIP check could not be completed")
-  } : getMeta({
-    allGood: false,
-    atLeastOneGood: checks.singBoxFakeIP || checks.browserFakeIP
-  });
-  updateCheckStore({
-    order,
-    code,
-    title,
-    description,
-    state,
-    items: [
-      {
-        state: checks.singBoxFakeIP ? "success" : "error",
-        key: checks.singBoxFakeIP ? _("Sing-box FakeIP DNS works") : _("Sing-box FakeIP DNS does not work"),
-        value: routerFakeIPResponse.success ? routerFakeIPResponse.data.IP : ""
-      },
-      {
-        state: browserFakeIPCheckUnavailable ? "warning" : checks.browserFakeIP ? "success" : "error",
-        key: browserFakeIPCheckUnavailable ? _("Browser FakeIP check could not be completed") : checks.browserFakeIP ? _("Browser is using FakeIP correctly") : _("Browser is not using FakeIP"),
-        value: browserFakeIPCheckMessage
-      },
-      ...insertIf(checks.browserFakeIP, [
-        {
-          state: checks.differentIP ? "success" : "warning",
-          key: !checks.canComparePublicIP ? _("Could not compare FakeIP and control public IPs") : checks.differentIP ? _("FakeIP and control checks use different public IPs") : _("FakeIP and control checks use the same public IP"),
-          value: ""
-        }
-      ])
-    ]
-  });
 }
 
 // src/forkop/tabs/diagnostic/checks/getCheckItemsMeta.ts
@@ -10404,7 +10342,7 @@ function getDiagnosticRunners(providerOptions) {
     ...providerOptions.includeZapret2 ? [{ code: "ZAPRET2" /* ZAPRET2 */, run: runZapret2Check }] : [],
     ...providerOptions.includeByedpi ? [{ code: "BYEDPI" /* BYEDPI */, run: runByedpiCheck }] : [],
     { code: "OUTBOUNDS" /* OUTBOUNDS */, run: runSectionsCheck },
-    { code: "FAKEIP" /* FAKEIP */, run: runFakeIPCheck }
+    { code: "FAKEIP", run: async function () { return { skipped: true, title: "FakeIP removed" }; } }
   ];
 }
 async function runChecks({ resume } = {}) {

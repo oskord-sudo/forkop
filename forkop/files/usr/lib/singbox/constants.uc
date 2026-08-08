@@ -1,12 +1,8 @@
 #!/usr/bin/env ucode
 
 const DNS_SERVER_TAG = "dns-server";
-const FAKEIP_DNS_SERVER_TAG = "fakeip-server";
 const BOOTSTRAP_DNS_SERVER_TAG = "bootstrap-dns-server";
 const DNSMASQ_DNS_SERVER_TAG = "dnsmasq-server";
-const FAKEIP_DNS_RULE_TAG = "fakeip-dns-rule-tag";
-const FAKEIP_RULESET_DNS_RULE_TAG = "fakeip-ruleset-dns-rule-tag";
-const SERVICE_FAKEIP_DNS_RULE_TAG = "service-fakeip-dns-rule-tag";
 
 const TPROXY_INBOUND_TAG = "tproxy-in";
 const TPROXY_INBOUND_ADDRESS = "0.0.0.0";
@@ -26,13 +22,10 @@ const SERVICE_MIXED_INBOUND_PORT = 4534;
 const DIRECT_OUTBOUND_TAG = "direct-out";
 const BYPASS_OUTBOUND_TAG = "bypass-out";
 const OUTBOUND_MARK = 134217728;
-const FAKEIP_INET4_RANGE = "198.18.0.0/15";
-const FAKEIP_INET6_RANGE = "fc00::/18";
 
 const DISABLED_UPDATE_INTERVAL = "876000h";
 const URLTEST_DEFAULT_IDLE_TIMEOUT = "30m";
 const CHECK_PROXY_IP_DOMAIN = "ip.podkop.fyi";
-const FAKEIP_TEST_DOMAIN = "fakeip.podkop.fyi";
 const TMP_SING_BOX_FOLDER = "/tmp/sing-box";
 const TMP_RULESET_FOLDER = TMP_SING_BOX_FOLDER + "/rulesets";
 const ZAPRET_ROUTE_MARK_BASE = 0x01000000;
@@ -42,12 +35,8 @@ const BYEDPI_PORT_BASE = 1080;
 
 const RESERVED_TAGS = {
     [DNS_SERVER_TAG]: true,
-    [FAKEIP_DNS_SERVER_TAG]: true,
     [BOOTSTRAP_DNS_SERVER_TAG]: true,
     [DNSMASQ_DNS_SERVER_TAG]: true,
-    [FAKEIP_DNS_RULE_TAG]: true,
-    [FAKEIP_RULESET_DNS_RULE_TAG]: true,
-    [SERVICE_FAKEIP_DNS_RULE_TAG]: true,
     [TPROXY_INBOUND_TAG]: true,
     [TPROXY_INBOUND6_TAG]: true,
     [DNS_INBOUND_TAG]: true,
@@ -88,12 +77,8 @@ function tailscale_dns_server_tag(section_name) {
 
 return {
     DNS_SERVER_TAG,
-    FAKEIP_DNS_SERVER_TAG,
     BOOTSTRAP_DNS_SERVER_TAG,
     DNSMASQ_DNS_SERVER_TAG,
-    FAKEIP_DNS_RULE_TAG,
-    FAKEIP_RULESET_DNS_RULE_TAG,
-    SERVICE_FAKEIP_DNS_RULE_TAG,
     TPROXY_INBOUND_TAG,
     TPROXY_INBOUND_ADDRESS,
     TPROXY_INBOUND6_TAG,
@@ -111,12 +96,9 @@ return {
     DIRECT_OUTBOUND_TAG,
     BYPASS_OUTBOUND_TAG,
     OUTBOUND_MARK,
-    FAKEIP_INET4_RANGE,
-    FAKEIP_INET6_RANGE,
     DISABLED_UPDATE_INTERVAL,
     URLTEST_DEFAULT_IDLE_TIMEOUT,
     CHECK_PROXY_IP_DOMAIN,
-    FAKEIP_TEST_DOMAIN,
     TMP_SING_BOX_FOLDER,
     TMP_RULESET_FOLDER,
     ZAPRET_ROUTE_MARK_BASE,

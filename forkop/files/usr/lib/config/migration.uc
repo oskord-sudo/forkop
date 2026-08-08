@@ -1286,7 +1286,7 @@ function migrate_http_connection_urls(ctx) {
 
 
 function migrate_routing_mode(ctx) {
-    // Default economy: dnsmasq + https-dns-proxy, no FakeIP
+    // Default economy: dnsmasq + https-dns-proxy, economy DNS
     let current = option(ctx.model.settings, "routing_mode", "");
     if (current == "")
         set_option(ctx, ctx.model.settings, "routing_mode", "economy");

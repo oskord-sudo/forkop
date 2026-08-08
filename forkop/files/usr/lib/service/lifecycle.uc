@@ -69,11 +69,10 @@ const NFT_PORT_SET_NAME = constant_value("NFT_PORT_SET_NAME", "forkop_ports");
 const NFT_IP_PORT_SET_NAME = constant_value("NFT_IP_PORT_SET_NAME", "forkop_ip_ports");
 const NFT_IP_PORT6_SET_NAME = constant_value("NFT_IP_PORT6_SET_NAME", "forkop_ip6_ports");
 const NFT_INTERFACE_SET_NAME = constant_value("NFT_INTERFACE_SET_NAME", "forkop_interfaces");
-const NFT_FAKEIP_MARK = constant_value("NFT_FAKEIP_MARK", "0x04000000");
+const NFT_PROXY_MARK = constant_value("NFT_PROXY_MARK", "0x05000000");
+const NFT_PROXY_MARK = constant_value("NFT_PROXY_MARK", NFT_PROXY_MARK); // legacy alias for cleanup
 const NFT_OUTBOUND_MARK = constant_value("NFT_OUTBOUND_MARK", "0x08000000");
 
-const SB_FAKEIP_INET4_RANGE = constant_value("SB_FAKEIP_INET4_RANGE", "198.18.0.0/15");
-const SB_FAKEIP_INET6_RANGE = constant_value("SB_FAKEIP_INET6_RANGE", "fc00::/18");
 const SB_TPROXY_INBOUND6_ADDRESS = constant_value("SB_TPROXY_INBOUND6_ADDRESS", "::1");
 const SB_TPROXY_INBOUND_PORT = constant_value("SB_TPROXY_INBOUND_PORT", "1602");
 const SB_SERVICE_MIXED_INBOUND_ADDRESS = constant_value("SB_SERVICE_MIXED_INBOUND_ADDRESS", "127.0.0.1");
@@ -583,9 +582,9 @@ function nft_rebuild_runtime() {
         NFT_PORT_SET_NAME,
         NFT_IP_PORT_SET_NAME,
         NFT_INTERFACE_SET_NAME,
-        NFT_FAKEIP_MARK,
+        NFT_PROXY_MARK,
         NFT_OUTBOUND_MARK,
-        SB_FAKEIP_INET4_RANGE,
+        "0.0.0.0/32",
         SB_TPROXY_INBOUND_PORT,
         ZAPRET_PROVIDER_NFQWS_BIN,
         ZAPRET_ROUTE_MARK_BASE,
@@ -600,7 +599,7 @@ function nft_rebuild_runtime() {
         NFT_LOCALV6_SET_NAME,
         NFT_COMMON6_SET_NAME,
         NFT_IP_PORT6_SET_NAME,
-        SB_FAKEIP_INET6_RANGE,
+        "::1/128",
         SB_TPROXY_INBOUND6_ADDRESS
     ]);
 }
@@ -616,7 +615,7 @@ function nft_populate_runtime_sets() {
         NFT_IP_PORT_SET_NAME,
         NFT_INTERFACE_SET_NAME,
         NFT_LOCALV4_SET_NAME,
-        NFT_FAKEIP_MARK,
+        NFT_PROXY_MARK,
         NFT_COMMON6_SET_NAME,
         NFT_IP_PORT6_SET_NAME,
         NFT_LOCALV6_SET_NAME
@@ -728,7 +727,7 @@ function start_main() {
         "wait-forkop-stable-start",
         RT_TABLE_NAME,
         NFT_TABLE_NAME,
-        NFT_FAKEIP_MARK,
+        NFT_PROXY_MARK,
         as_string(SING_BOX_START_STABLE_MIN_AGE),
         as_string(SING_BOX_START_VERIFY_TIMEOUT)
     ]);
@@ -815,10 +814,10 @@ function stop_main() {
     if (command_success_from_args([ "nft", "list", "table", "inet", NFT_TABLE_NAME ]))
         command_success_from_args([ "nft", "delete", "table", "inet", NFT_TABLE_NAME ]);
 
-    if (module_success(NFT_UC, [ "tproxy-marking-rule4-present", RT_TABLE_NAME, NFT_FAKEIP_MARK ]))
-        command_success_from_args([ "ip", "-4", "rule", "del", "fwmark", NFT_FAKEIP_MARK + "/" + NFT_FAKEIP_MARK, "table", RT_TABLE_NAME, "priority", "105" ]);
-    if (module_success(NFT_UC, [ "tproxy-marking-rule6-present", RT_TABLE_NAME, NFT_FAKEIP_MARK ]))
-        command_success_from_args([ "ip", "-6", "rule", "del", "fwmark", NFT_FAKEIP_MARK + "/" + NFT_FAKEIP_MARK, "table", RT_TABLE_NAME, "priority", "105" ]);
+    if (module_success(NFT_UC, [ "tproxy-marking-rule4-present", RT_TABLE_NAME, NFT_PROXY_MARK ]))
+        command_success_from_args([ "ip", "-4", "rule", "del", "fwmark", NFT_PROXY_MARK + "/" + NFT_PROXY_MARK, "table", RT_TABLE_NAME, "priority", "105" ]);
+    if (module_success(NFT_UC, [ "tproxy-marking-rule6-present", RT_TABLE_NAME, NFT_PROXY_MARK ]))
+        command_success_from_args([ "ip", "-6", "rule", "del", "fwmark", NFT_PROXY_MARK + "/" + NFT_PROXY_MARK, "table", RT_TABLE_NAME, "priority", "105" ]);
 
     if (module_success(NFT_UC, [ "tproxy-route4-present", RT_TABLE_NAME ]))
         command_success_from_args([ "ip", "route", "flush", "table", RT_TABLE_NAME ]);
@@ -883,7 +882,7 @@ function start() {
         "wait-forkop-stable-start",
         RT_TABLE_NAME,
         NFT_TABLE_NAME,
-        NFT_FAKEIP_MARK,
+        NFT_PROXY_MARK,
         as_string(RUNTIME_STABLE_MIN_AGE),
         "8"
     ]);
@@ -949,7 +948,7 @@ function restart_runtime_for_reload() {
         "wait-forkop-stable-start",
         RT_TABLE_NAME,
         NFT_TABLE_NAME,
-        NFT_FAKEIP_MARK,
+        NFT_PROXY_MARK,
         as_string(RUNTIME_STABLE_MIN_AGE),
         "8"
     ]);
@@ -1115,7 +1114,7 @@ function reload(reason) {
     if (status != 0)
         return status;
 
-    if (!module_success(STATE_UC, [ "forkop-running", RT_TABLE_NAME, NFT_TABLE_NAME, NFT_FAKEIP_MARK ])) {
+    if (!module_success(STATE_UC, [ "forkop-running", RT_TABLE_NAME, NFT_TABLE_NAME, NFT_PROXY_MARK ])) {
         log_message("Runtime state is incomplete; restarting Forkop runtime", "info");
         return finish_reload_status(restart_runtime_for_reload(), reload_config_fingerprint);
     }
@@ -1239,7 +1238,7 @@ function reload(reason) {
             "wait-forkop-stable-start",
             RT_TABLE_NAME,
             NFT_TABLE_NAME,
-            NFT_FAKEIP_MARK,
+            NFT_PROXY_MARK,
             as_string(SING_BOX_START_STABLE_MIN_AGE),
             as_string(SING_BOX_START_VERIFY_TIMEOUT)
         ]);
@@ -1340,7 +1339,7 @@ function restart() {
         "forkop-stably-running",
         RT_TABLE_NAME,
         NFT_TABLE_NAME,
-        NFT_FAKEIP_MARK,
+        NFT_PROXY_MARK,
         as_string(RUNTIME_STABLE_MIN_AGE)
     ])) {
         restore_selector_state(selector_state);

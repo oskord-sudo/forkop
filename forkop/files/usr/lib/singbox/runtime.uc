@@ -32,7 +32,7 @@ const NFT_IP_PORT6_SET_NAME = getenv("NFT_IP_PORT6_SET_NAME") || "forkop_ip6_por
 const NFT_INTERFACE_SET_NAME = getenv("NFT_INTERFACE_SET_NAME") || "forkop_interfaces";
 const NFT_LOCALV4_SET_NAME = getenv("NFT_LOCALV4_SET_NAME") || "localv4";
 const NFT_LOCALV6_SET_NAME = getenv("NFT_LOCALV6_SET_NAME") || "localv6";
-const NFT_FAKEIP_MARK = getenv("NFT_FAKEIP_MARK") || "0x04000000";
+const NFT_PROXY_MARK = getenv("NFT_PROXY_MARK") || "0x05000000";
 const SB_SERVICE_MIXED_INBOUND_ADDRESS = getenv("SB_SERVICE_MIXED_INBOUND_ADDRESS") || "127.0.0.1";
 const SB_SERVICE_MIXED_INBOUND_PORT = getenv("SB_SERVICE_MIXED_INBOUND_PORT") || "4534";
 const SB_VARIANT_STATE_FILE = getenv("SB_VARIANT_STATE_FILE") || "/etc/forkop/sing-box-variant";
@@ -832,7 +832,7 @@ function init_config(populate_nft, caches_prepared, no_refresh, prepared_deferre
         NFT_IP_PORT_SET_NAME,
         NFT_INTERFACE_SET_NAME,
         NFT_LOCALV4_SET_NAME,
-        NFT_FAKEIP_MARK,
+        NFT_PROXY_MARK,
         NFT_COMMON6_SET_NAME,
         NFT_IP_PORT6_SET_NAME,
         NFT_LOCALV6_SET_NAME

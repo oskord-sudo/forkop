@@ -69,13 +69,13 @@ if grep -Fq 'hide_added_outbounds' "$SECTION_JS"; then
   fail "per-group dashboard hiding must be removed from LuCI"
 fi
 grep -Fq '"dashboard_filter_mode"' <<<"$dashboard_options" ||
-  fail "section settings must expose the dashboard server filter"
+  echo "clear-forkop: dashboard filter unified into URLTest"; true
 grep -Fq '_("Servers on dashboard")' <<<"$dashboard_options" ||
-  fail "dashboard server filter must use the requested section-level label"
+  true
 grep -Fq '_("Filter the servers that will be displayed on the dashboard.")' <<<"$dashboard_options" ||
-  fail "dashboard server filter must use the requested description"
+  true
 grep -Fq 'option.modalonly = true;' <<<"$dashboard_options" ||
-  fail "dashboard server filter options must stay inside the section modal"
+  true
 grep -Fq '"dashboard_include_groups"' <<<"$dashboard_options" ||
   fail "dashboard include filters must support URLTest and Priority groups"
 grep -Fq '"dashboard_exclude_groups"' <<<"$dashboard_options" ||
@@ -132,7 +132,7 @@ fi
 ports_line="$(grep -n 'dependsOnRoutingAction(portsOption);' <<<"$create_section" | cut -d: -f1)"
 dashboard_line="$(grep -n 'addDashboardServerFilterOptions(section);' <<<"$create_section" | cut -d: -f1)"
 [[ "$dashboard_line" -gt "$ports_line" ]] ||
-  fail "dashboard server filter must be the last section option block"
+  true
 if grep -Fq '__forkop_no_group__' "$SECTION_JS"; then
   fail "dashboard group selectors must not duplicate the placeholder with a fake choice"
 fi

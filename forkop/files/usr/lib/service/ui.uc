@@ -31,7 +31,7 @@ const SERVICE_ACTION_SETTLE_SECONDS = getenv("FORKOP_UI_SERVICE_ACTION_SETTLE_SE
 const RUNTIME_STABLE_MIN_AGE = getenv("FORKOP_RUNTIME_STABLE_MIN_AGE") || "2";
 const NFT_TABLE_NAME = getenv("NFT_TABLE_NAME") || "ForkopTable";
 const RT_TABLE_NAME = getenv("RT_TABLE_NAME") || "forkop";
-const NFT_FAKEIP_MARK = getenv("NFT_FAKEIP_MARK") || "0x04000000";
+const NFT_PROXY_MARK = getenv("NFT_PROXY_MARK") || "0x05000000";
 const SB_DNS_INBOUND_ADDRESS = getenv("SB_DNS_INBOUND_ADDRESS") || "127.0.0.42";
 const ZAPRET_PROVIDER_NFQWS_BIN = getenv("ZAPRET_PROVIDER_NFQWS_BIN") || "/opt/zapret/nfq/nfqws";
 const ZAPRET2_PROVIDER_NFQWS2_BIN = getenv("ZAPRET2_PROVIDER_NFQWS2_BIN") || "/opt/zapret2/nfq2/nfqws2";
@@ -867,7 +867,7 @@ function forkop_running() {
         "forkop-stably-running",
         RT_TABLE_NAME,
         NFT_TABLE_NAME,
-        NFT_FAKEIP_MARK,
+        NFT_PROXY_MARK,
         RUNTIME_STABLE_MIN_AGE
     ]);
 }
@@ -1227,7 +1227,7 @@ function launch_worker(args) {
         FORKOP_PENDING_RELOAD_FILE: PENDING_RELOAD_FILE,
         NFT_TABLE_NAME,
         RT_TABLE_NAME,
-        NFT_FAKEIP_MARK,
+        NFT_PROXY_MARK,
         SB_DNS_INBOUND_ADDRESS,
         ZAPRET_PROVIDER_NFQWS_BIN,
         ZAPRET2_PROVIDER_NFQWS2_BIN,
