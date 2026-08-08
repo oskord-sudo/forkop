@@ -537,6 +537,7 @@ msgid "Domains"
 msgstr "Домены"
 
 msgid "Dont Touch My DHCP!"
+# clear-forkop: option removed from UI
 msgstr "Отключить управление DHCP"
 
 msgid "Downlink"
@@ -2275,3 +2276,69 @@ msgstr "sing-box outbound для Zapret2 настроен"
 
 msgid "Zapret2 sing-box outbound is not configured"
 msgstr "sing-box outbound для Zapret2 не настроен"
+
+
+# clear-forkop transport policy
+
+msgid "Torrents without proxy"
+msgstr "Торренты без прокси"
+
+msgid "Send BitTorrent traffic direct (not through proxy/VPN). Uses protocol detection, common BT ports, and optional custom ports."
+msgstr "Отправлять BitTorrent напрямую (не через прокси/VPN). Используются определение протокола, стандартные порты BT и дополнительные порты."
+
+msgid "Extra BitTorrent ports"
+msgstr "Дополнительные порты BitTorrent"
+
+msgid "Additional TCP/UDP ports treated as BitTorrent and sent direct. Examples: 51413, 6881-6889."
+msgstr "Дополнительные порты TCP/UDP, считающиеся BitTorrent и идущие напрямую. Примеры: 51413, 6881-6889."
+
+msgid "Proxy VoIP / calls"
+msgstr "Проксировать VoIP / звонки"
+
+msgid "Route typical call/media ports through the selected proxy section."
+msgstr "Направлять типичные порты звонков/медиа через выбранную прокси-секцию."
+
+msgid "VoIP / calls section"
+msgstr "Секция для VoIP / звонков"
+
+msgid "Proxy section used for call/media traffic when Proxy VoIP is enabled."
+msgstr "Прокси-секция для трафика звонков/медиа при включённом проксировании VoIP."
+
+msgid "Discord voice via direct (Zapret-friendly)"
+msgstr "Голос Discord напрямую (совместимо с Zapret)"
+
+msgid "Prefer direct for Discord voice UDP ranges so traffic can use Zapret path when configured."
+msgstr "Предпочитать direct для UDP-диапазонов голоса Discord, чтобы трафик мог идти через Zapret."
+
+msgid "LAN client policy"
+msgstr "Политика клиентов LAN"
+
+msgid "Limit which devices on the LAN are processed by Forkop routing."
+msgstr "Ограничить, какие устройства в LAN обрабатывает маршрутизация Forkop."
+
+msgid "All devices"
+msgstr "Все устройства"
+
+msgid "All except listed (IP/MAC)"
+msgstr "Все, кроме указанных (IP/MAC)"
+
+msgid "Only listed devices (IP/MAC)"
+msgstr "Только указанные устройства (IP/MAC)"
+
+msgid "Direct IPv4 clients"
+msgstr "Клиенты IPv4 напрямую"
+
+msgid "These clients skip proxy/VPN routing (except listed mode)."
+msgstr "Эти клиенты обходят прокси/VPN (режим «все кроме указанных»)."
+
+msgid "Direct MAC clients"
+msgstr "Клиенты MAC напрямую"
+
+msgid "Proxied IPv4 clients"
+msgstr "Клиенты IPv4 через прокси"
+
+msgid "Only these clients are routed by Forkop (listed only mode)."
+msgstr "Только эти клиенты маршрутизируются Forkop (режим «только указанные»)."
+
+msgid "Proxied MAC clients"
+msgstr "Клиенты MAC через прокси"

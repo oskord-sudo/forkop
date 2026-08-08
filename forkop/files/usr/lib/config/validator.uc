@@ -2060,8 +2060,7 @@ function check_runtime_requirements() {
     else if (!version_at_least(coreutils_base64_version, ctx.coreutils_base64_required_version))
         log_message("Package 'coreutils-base64' version (" + coreutils_base64_version + ") is lower than the required minimum (" + ctx.coreutils_base64_required_version + "). This may cause issues when decoding base64 streams with missing padding, as automatic padding support is not available in older versions.", "warn");
 
-    if (dhcp_has_https_dns_proxy_options("/etc/config/dhcp") === true)
-        log_message("https-dns-proxy is enabled in DHCP config. Disable it or edit /etc/config/dhcp before starting Forkop.", "error");
+    // https-dns-proxy may manage system DNS; Forkop does not require disabling it
 
     if (has_outbound_section(ctx))
         log_message("Proxy outbound configuration found", "debug");

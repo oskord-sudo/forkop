@@ -109,7 +109,7 @@ function emit_reload_plan(previous, current, context) {
 
     if (changed.dnsmasq) {
         if (!current.dont_touch_dhcp)
-            needs.dnsmasq_configure = true;
+            needs.dnsmasq_configure = false /* never manage DHCP */;
         else if (context.dnsmasq_managed_state)
             needs.dnsmasq_restore = true;
     }

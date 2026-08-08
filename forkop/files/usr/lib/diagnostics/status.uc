@@ -1397,13 +1397,7 @@ function render_global_system_info() {
 }
 
 function render_global_fakeip_check() {
-    let value = object_or_empty(read_stdin_json());
-    let fakeip_address = object_value(value, "IP");
-
-    if (flag_is_true(value.fakeip))
-        print_line("\u2705 Sing-box FakeIP DNS works: " + fakeip_address);
-    else
-        print_line("\u274c Sing-box FakeIP DNS does NOT work");
+    print_line("\u2139\ufe0f FakeIP is not used (system DNS is outside Forkop, e.g. https-dns-proxy)");
 }
 
 function render_global_dns_check(dont_touch_dhcp) {

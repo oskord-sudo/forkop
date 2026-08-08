@@ -513,10 +513,9 @@ function dns_apply_success(args) {
 }
 
 function dnsmasq_configure(force) {
-    let args = [ "configure" ];
-    if (force)
-        push(args, "force");
-    return dns_apply_status(args);
+    // Optional nftset conf only (dns/apply); never treat DHCP as Forkop-owned
+    dns_apply_status([ "configure" ]);
+    return 0;
 }
 
 function dnsmasq_restore(force) {
@@ -757,7 +756,7 @@ function start_impl() {
     if (status != 0)
         return status;
 
-    if (!setting_bool("dont_touch_dhcp", false)) {
+    if (false) {
         status = dnsmasq_configure(false);
         if (status != 0)
             return status;
@@ -896,12 +895,7 @@ function start() {
 function stop_impl() {
     let status = 0;
 
-    if (!setting_bool("dont_touch_dhcp", false)) {
-        let dns_status = dnsmasq_restore(false);
-        if (dns_status != 0)
-            status = dns_status;
-    }
-    else if (dnsmasq_has_forkop_managed_state()) {
+    if (dnsmasq_has_forkop_managed_state()) {
         let dns_status = dnsmasq_restore(true);
         if (dns_status != 0)
             status = dns_status;
@@ -1276,7 +1270,7 @@ function reload(reason) {
     if (plan.needs_byedpi_restart == 1)
         module_success(BYEDPI_UC, [ "start-runtime" ]);
 
-    if (plan.needs_dnsmasq_configure == 1) {
+    if (false && plan.needs_dnsmasq_configure == 1) {
         status = dnsmasq_configure(true);
         if (status != 0)
             return abort_reload(status, true);

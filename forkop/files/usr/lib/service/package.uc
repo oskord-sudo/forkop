@@ -85,7 +85,7 @@ function truthy(value) {
 }
 
 function dont_touch_dhcp_enabled() {
-    return truthy(uci_core.get(CONFIG_NAME + ".settings.dont_touch_dhcp"));
+    return true;
 }
 
 function restore_dnsmasq_if_needed() {

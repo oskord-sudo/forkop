@@ -12,7 +12,7 @@ const LIB_DIR = getenv("FORKOP_LIB") || "/usr/lib/forkop";
 const FORKOP_VERSION = getenv("FORKOP_VERSION") || constants.FORKOP_VERSION || "";
 const FORKOP_CONFIG = getenv("FORKOP_CONFIG") || constants.FORKOP_CONFIG || "/etc/config/" + CONFIG_NAME;
 const FORKOP_SERVICE_NAME = getenv("FORKOP_SERVICE_NAME") || constants.FORKOP_SERVICE_NAME || "forkop";
-const FORKOP_RELEASE_REPO = getenv("FORKOP_RELEASE_REPO") || constants.FORKOP_RELEASE_REPO || "ushan0v/forkop";
+const FORKOP_RELEASE_REPO = getenv("FORKOP_RELEASE_REPO") || constants.FORKOP_RELEASE_REPO || "oskord-sudo/forkop";
 const FORKOP_LUCI_VIEW_DIR = getenv("FORKOP_LUCI_VIEW_DIR") || constants.FORKOP_LUCI_VIEW_DIR || "/www/luci-static/resources/view/forkop";
 const RUNTIME_STATE_DIR = getenv("FORKOP_RUNTIME_STATE_DIR") || "/var/run/forkop";
 const SYSTEM_INFO_CACHE_FILE = getenv("FORKOP_SYSTEM_INFO_CACHE_FILE") || RUNTIME_STATE_DIR + "/system-info.json";
@@ -1319,80 +1319,61 @@ function dns_check_timeout_seconds(value) {
 }
 
 function check_dns_available() {
-    let cfg = settings();
-    let dns_type = option(cfg, "dns_type", "");
-    let active = runtime_dns.active_values(cfg);
-    let dns_server = active.main;
-    let bootstrap_dns_server = active.bootstrap;
-    let dont_touch_dhcp = bool_option(cfg, "dont_touch_dhcp", false) ? 1 : 0;
+    // System DNS is owned by dnsmasq / https-dns-proxy — not Forkop FakeIP
     let domain = "example.com";
-    let timeout_seconds = dns_check_timeout_seconds(option(cfg, "dns_check_timeout", "2s"));
+    let timeout_seconds = 2;
     let dns_status = 0;
     let dns_on_router = 0;
     let bootstrap_dns_status = 0;
     let dhcp_config_status = 1;
+    let dns_type = "system";
+    let dns_server = "127.0.0.1";
+    let bootstrap_dns_server = "";
+    let hdp_running = system("pgrep -f https-dns-proxy >/dev/null 2>&1") == 0 ||
+        system("[ -x /etc/init.d/https-dns-proxy ] && /etc/init.d/https-dns-proxy running >/dev/null 2>&1") == 0;
 
-    let active_dns_args = [ "dig" ];
-    if (runtime_dns.failover_enabled(cfg)) {
-        push(active_dns_args, "-p");
-        push(active_dns_args, as_string(runtime_dns.health_port("active", 0)));
-    }
-    push(active_dns_args, "@" + SB_DNS_INBOUND_ADDRESS);
-    push(active_dns_args, domain);
-    push(active_dns_args, "A");
-    push(active_dns_args, "+short");
-    push(active_dns_args, "+timeout=" + as_string(timeout_seconds));
-    push(active_dns_args, "+tries=1");
-    for (let line in split(command_output_from_args(active_dns_args), "\n"))
-        if (valid_ipv4(trim(as_string(line)))) {
-            dns_status = 1;
-            break;
-        }
-
-    if (dns_check_router_resolver_available(domain))
+    // Resolve via router default resolver (dnsmasq → often https-dns-proxy)
+    if (dns_check_router_resolver_available(domain)) {
         dns_on_router = 1;
-
-    let dns_server_host = url_host(dns_server);
-    if (dns_server_host == "")
-        dns_server_host = dns_server;
-    if (bootstrap_dns_server != "") {
-        if (length(active.state.bootstrap_servers) > 1) {
-            for (let line in split(command_output_from_args([
-                "dig", "-p", as_string(runtime_dns.health_port("bootstrap", active.state.bootstrap_index)),
-                "@" + runtime_dns.DNS_HEALTH_ADDRESS, domain, "A", "+short",
-                "+timeout=" + as_string(timeout_seconds), "+tries=1"
-            ]), "\n"))
-                if (valid_ipv4(trim(as_string(line)))) {
-                    bootstrap_dns_status = 1;
-                    break;
-                }
-        }
-        else {
-            let bootstrap_check_domain = domain;
-            if (dns_server_host != "" && !valid_ipv4(dns_server_host))
-                bootstrap_check_domain = dns_server_host;
-            if (dns_check_resolve_host(bootstrap_check_domain, bootstrap_dns_server, timeout_seconds) != "")
-                bootstrap_dns_status = 1;
-        }
+        dns_status = 1;
     }
 
-    if (!module_success(DNS_APPLY_UC, [ "default-config-complete" ]))
-        dhcp_config_status = 0;
+    // Probe common https-dns-proxy listen ports
+    for (let port in [ "5053", "5054", "5055", "5353" ]) {
+        for (let line in split(command_output_from_args([
+            "dig", "-p", port, "@127.0.0.1", domain, "A", "+short",
+            "+timeout=" + as_string(timeout_seconds), "+tries=1"
+        ]), "\n")) {
+            if (valid_ipv4(trim(as_string(line)))) {
+                dns_status = 1;
+                dns_server = "127.0.0.1#" + port;
+                if (hdp_running)
+                    dns_type = "https-dns-proxy";
+                break;
+            }
+        }
+        if (dns_status)
+            break;
+    }
 
-    let display_dns_server = replace(status_output([ "mask-dns-server", dns_server ], null), /[\r\n]+$/g, "");
+    if (hdp_running && dns_type == "system")
+        dns_type = "https-dns-proxy";
+
+    bootstrap_dns_status = dns_status;
     write_json({
         dns_type,
-        dns_server: display_dns_server,
-        dns_server_index: active.state.main_index,
-        dns_server_count: length(active.state.main_servers),
+        dns_server,
+        dns_server_index: 0,
+        dns_server_count: 1,
         dns_status,
         dns_on_router,
         bootstrap_dns_server,
-        bootstrap_dns_server_index: active.state.bootstrap_index,
-        bootstrap_dns_server_count: length(active.state.bootstrap_servers),
+        bootstrap_dns_server_index: 0,
+        bootstrap_dns_server_count: 0,
         bootstrap_dns_status,
         dhcp_config_status,
-        dont_touch_dhcp
+        dont_touch_dhcp: 1,
+        https_dns_proxy_running: hdp_running ? 1 : 0
     });
     return 0;
 }
@@ -1537,33 +1518,7 @@ function check_sing_box() {
 }
 
 function check_fakeip() {
-    let fakeip_address = "";
-    let fakeip6_address = "";
-    for (let line in split(command_output_from_args([
-        "dig", "+short", "@" + SB_DNS_INBOUND_ADDRESS, FAKEIP_TEST_DOMAIN, "A", "+timeout=2", "+tries=1"
-    ]), "\n")) {
-        line = trim(as_string(line));
-        if (valid_ipv4(line)) {
-            fakeip_address = line;
-            break;
-        }
-    }
-    for (let line in split(command_output_from_args([
-        "dig", "+short", "@" + SB_DNS_INBOUND_ADDRESS, FAKEIP_TEST_DOMAIN, "AAAA", "+timeout=2", "+tries=1"
-    ]), "\n")) {
-        line = lc(trim(as_string(line)));
-        if (core_ip.valid_ipv6(line)) {
-            fakeip6_address = line;
-            break;
-        }
-    }
-    write_json({
-        fakeip: match(fakeip_address, /^198\.(18|19)\./) != null || match(fakeip6_address, /^fc[0-3][0-9a-f]:/) != null,
-        IP: fakeip_address != "" ? fakeip_address : fakeip6_address,
-        IPv4: fakeip_address,
-        IPv6: fakeip6_address
-    });
-    return 0;
+    return { fakeip: false, IP: "", IPv4: "", IPv6: "", skipped: true };
 }
 
 function clash_json_output(args) {

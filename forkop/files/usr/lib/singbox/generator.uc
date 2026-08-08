@@ -3021,13 +3021,24 @@ function add_global_transport_rules(config, settings, sections) {
         }
     }
 
-    // 3) VoIP / calls → first proxy section outbound (or leave to catch-all if none)
+    // 3) VoIP / calls → selected proxy section
     if (settings_flag(settings, "proxy_calls", false)) {
         let proxy_tag = "";
-        for (let section in array_or_empty(sections)) {
-            if (section_is_proxy_transport(section)) {
-                proxy_tag = outbound_tag(section[".name"]);
-                break;
+        let prefer = option(settings, "proxy_calls_section", "");
+        if (prefer != "") {
+            for (let section in array_or_empty(sections)) {
+                if (section[".name"] == prefer && section_is_proxy_transport(section)) {
+                    proxy_tag = outbound_tag(prefer);
+                    break;
+                }
+            }
+        }
+        if (proxy_tag == "") {
+            for (let section in array_or_empty(sections)) {
+                if (section_is_proxy_transport(section)) {
+                    proxy_tag = outbound_tag(section[".name"]);
+                    break;
+                }
             }
         }
         if (proxy_tag != "") {
