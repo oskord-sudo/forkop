@@ -1,0 +1,9 @@
+.idea
+fe-app-forkop/node_modules
+fe-app-forkop/.yarn/
+fe-app-forkop/.env
+.DS_Store
+
+sandbox/
+.build/
+dist/
