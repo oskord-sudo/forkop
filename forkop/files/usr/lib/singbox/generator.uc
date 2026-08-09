@@ -2484,8 +2484,8 @@ function push_dns_matcher_rule(config, rule) {
 }
 
 function section_dns_server(section) {
-    return option(section, "action", "") == "bypass"
-        ? runtime_constants.DNS_SERVER_TAG
+    // clear-forkop: no FakeIP DNS — all sections use system DNS server tag
+    return runtime_constants.DNS_SERVER_TAG;
 }
 
 function single_or_array(values) {
