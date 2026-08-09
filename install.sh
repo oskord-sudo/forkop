@@ -1795,19 +1795,19 @@ install_dns_dependencies() {
     if pkg_is_installed "https-dns-proxy"; then
         msg "https-dns-proxy already installed"
     else
-        if ! pkg_install "https-dns-proxy"; then
+        if ! pkg_install_name "https-dns-proxy"; then
             warn "Failed to install https-dns-proxy — install it manually"
         fi
     fi
     if pkg_is_installed "luci-app-https-dns-proxy" || pkg_is_installed "luci-app-https-dns-proxy"; then
         true
     else
-        pkg_install "luci-app-https-dns-proxy" 2>/dev/null || warn "luci-app-https-dns-proxy not installed"
+        pkg_install_name "luci-app-https-dns-proxy" 2>/dev/null || warn "luci-app-https-dns-proxy not installed"
     fi
     # Russian i18n when installer language is ru
     case "$INSTALLER_LANG" in
         ru|ru_*)
-            pkg_install "luci-i18n-https-dns-proxy-ru" 2>/dev/null || true
+            pkg_install_name "luci-i18n-https-dns-proxy-ru" 2>/dev/null || true
             ;;
     esac
     if [ -x /etc/init.d/https-dns-proxy ]; then
