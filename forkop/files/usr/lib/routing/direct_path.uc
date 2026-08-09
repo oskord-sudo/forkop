@@ -221,25 +221,8 @@ function apply_vpn_interface_routing(table, interface_set, localv4, localv6) {
     for (let section in sections) {
         let action = section_action_of(section);
         // vpn action OR connection with only interfaces (no proxy transport)
-        let ifaces = [];
-        // load interfaces from UCI
+        let ifaces = connections.interfaces(section);
         let name = section[".name"];
-        let pipe = fs.popen("uci -q get " + CONFIG_NAME + "." + name + ".interface 2>/dev/null; uci -q get " + CONFIG_NAME + "." + name + ".interfaces 2>/dev/null", "r");
-        let raw = pipe != null ? pipe.read("all") : "";
-        if (pipe != null)
-            pipe.close();
-        for (let iface in split(as_string(raw), /[ \t\n]/)) {
-            iface = trim(iface);
-            if (iface != "")
-                push(ifaces, iface);
-        }
-        // section_interface children
-        pipe = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | grep 'section_interface.*name=' | head -50", "r");
-        // simpler: list_option style via uci show
-        pipe = fs.popen("uci -q each " + CONFIG_NAME + " 2>/dev/null", "r");
-        if (pipe != null)
-            pipe.close();
-
         if (action != "vpn" && length(ifaces) == 0)
             continue;
         if (action != "vpn" && action != "connection" && action != "proxy" && action != "outbound")

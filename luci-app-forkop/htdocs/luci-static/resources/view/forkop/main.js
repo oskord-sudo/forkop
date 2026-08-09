@@ -4206,8 +4206,8 @@ var DIAGNOSTICS_CHECKS_MAP = {
     code: "OUTBOUNDS" /* OUTBOUNDS */
   },
   ["FAKEIP" /* FAKEIP */]: {
-    order: 9,
-    title: getCheckTitle("DNS"),
+    order: 99,
+    title: "REMOVED",
     code: "FAKEIP" /* FAKEIP */
   },
   ["INBOUNDS" /* INBOUNDS */]: {
@@ -7579,22 +7579,26 @@ function getMeta({ allGood, atLeastOneGood }) {
 
 // src/forkop/tabs/diagnostic/checks/getDnsCheckPresentation.ts
 function getDnsCheckPresentation(data) {
-  const dhcpManagedManually = Boolean(data.dont_touch_dhcp);
-  const dhcpCheckOk = dhcpManagedManually || Boolean(data.dhcp_config_status);
-  const allGood = Boolean(data.dns_on_router) && dhcpCheckOk && Boolean(data.bootstrap_dns_status) && Boolean(data.dns_status);
-  const atLeastOneGood = Boolean(data.dns_on_router) || dhcpCheckOk || Boolean(data.bootstrap_dns_status) || Boolean(data.dns_status);
-  const meta = getMeta({ atLeastOneGood, allGood });
-  const state = dhcpManagedManually && meta.state === "success" ? "warning" : meta.state;
-  const description = dhcpManagedManually && meta.state === "success" ? _("Checks passed with manual DHCP") : meta.description;
-  const dhcpItemState = dhcpManagedManually ? "warning" : data.dhcp_config_status ? "success" : "error";
-  const dhcpItemKey = dhcpManagedManually ? _("DHCP is managed manually") : _("DHCP has DNS server");
+  // clear-forkop: Forkop does not manage DHCP; never warn about manual DHCP
+  const items = [];
+  const meta = getCheckItemsMeta([
+    {
+      state: data.dns_status ? "success" : "error",
+      key: "dns"
+    },
+    {
+      state: data.dns_on_router ? "success" : "error",
+      key: "router"
+    }
+  ]);
   return {
-    state,
-    description,
-    dhcpItemState,
-    dhcpItemKey
+    state: meta.state,
+    description: meta.description,
+    dhcpItemState: "success",
+    dhcpItemKey: _("DHCP (system / OpenWrt)")
   };
 }
+
 
 // src/forkop/tabs/diagnostic/checks/runDnsCheck.ts
 async function runDnsCheck() {
@@ -7928,7 +7932,7 @@ async function runNftCheck() {
     throw new Error("Nftables checks failed");
   }
   const data = nftablesChecks.data;
-  const allGood = Boolean(data.table_exist) && Boolean(data.rules_mangle_exist) && Boolean(data.rules_mangle_counters) && Boolean(data.rules_mangle_output_exist) && Boolean(data.rules_mangle_output_counters) && Boolean(data.rules_proxy_exist) && Boolean(data.rules_proxy_counters) && !data.rules_other_mark_exist;
+  const allGood = Boolean(data.table_exist) && Boolean(data.rules_mangle_exist) && Boolean(data.rules_mangle_output_exist) && Boolean(data.rules_proxy_exist) && !data.rules_other_mark_exist;
   const atLeastOneGood = Boolean(data.table_exist) || Boolean(data.rules_mangle_exist) || Boolean(data.rules_mangle_counters) || Boolean(data.rules_mangle_output_exist) || Boolean(data.rules_mangle_output_counters) || Boolean(data.rules_proxy_exist) || Boolean(data.rules_proxy_counters) || !data.rules_other_mark_exist;
   const { state, description } = getMeta({ atLeastOneGood, allGood });
   updateCheckStore({
@@ -7949,9 +7953,9 @@ async function runNftCheck() {
         value: ""
       },
       {
-        state: data.rules_mangle_counters ? "success" : "warning",
+        state: data.rules_mangle_exist ? "success" : "error",
         key: _("Rules mangle counters"),
-        value: ""
+        value: data.rules_mangle_counters ? "" : _("idle (no traffic yet)")
       },
       {
         state: data.rules_mangle_output_exist ? "success" : "error",
@@ -7959,9 +7963,9 @@ async function runNftCheck() {
         value: ""
       },
       {
-        state: data.rules_mangle_output_counters ? "success" : "error",
+        state: data.rules_mangle_output_exist ? "success" : "error",
         key: _("Rules mangle output counters"),
-        value: ""
+        value: data.rules_mangle_output_counters ? "" : _("idle (no traffic yet)")
       },
       {
         state: data.rules_proxy_exist ? "success" : "error",
@@ -7969,9 +7973,9 @@ async function runNftCheck() {
         value: ""
       },
       {
-        state: data.rules_proxy_counters ? "success" : "error",
+        state: data.rules_proxy_exist ? "success" : "error",
         key: _("Rules proxy counters"),
-        value: ""
+        value: data.rules_proxy_counters ? "" : _("idle (no traffic yet)")
       },
       {
         state: !data.rules_other_mark_exist ? "success" : "warning",
@@ -10341,10 +10345,10 @@ function getDiagnosticRunners(providerOptions) {
     ...providerOptions.includeZapret ? [{ code: "ZAPRET" /* ZAPRET */, run: runZapretCheck }] : [],
     ...providerOptions.includeZapret2 ? [{ code: "ZAPRET2" /* ZAPRET2 */, run: runZapret2Check }] : [],
     ...providerOptions.includeByedpi ? [{ code: "BYEDPI" /* BYEDPI */, run: runByedpiCheck }] : [],
-    { code: "OUTBOUNDS" /* OUTBOUNDS */, run: runSectionsCheck },
-    { code: "FAKEIP", run: async function () { return { skipped: true, title: "FakeIP removed" }; } }
+    { code: "OUTBOUNDS" /* OUTBOUNDS */, run: runSectionsCheck }
   ];
 }
+
 async function runChecks({ resume } = {}) {
   if (store.get().diagnosticsRunAction.loading && !resume) {
     return;

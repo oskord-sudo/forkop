@@ -73,20 +73,20 @@ function section_has_proxy_transport(section) {
 
 function section_uses_singbox(section) {
     let action = option(section, "action", "");
-    // ByeDPI: thin sing-box hop only (SOCKS → ciadpi), no domain/IP lists
     if (action == "byedpi")
         return true;
-    // Zapret / pure VPN interface: never through sing-box
-    if (action == "zapret" || action == "zapret2")
-        return false;
-    if (action == "vpn")
+    if (action == "zapret" || action == "zapret2" || action == "vpn")
         return false;
     if (action == "bypass" || action == "block" || action == "dns")
         return false;
+    // Only real proxy transport goes through sing-box (URLs/subs/JSON).
+    // Interface-only (AWG/WG) → kernel policy routing via routing.direct_path.
     if (connections.is_connections_action(action))
         return section_has_proxy_transport(section);
     return false;
 }
+
+
 
 function section_is_byedpi(section) {
     return option(section, "action", "") == "byedpi";
@@ -2148,9 +2148,12 @@ function add_interface_connection_outbound(config, state, section, interface_ind
 }
 
 function add_connection_interfaces(config, state, section, taken, selector_tags, urltest_candidate_tags) {
-    // AWG / WireGuard / other VPN interfaces: kernel policy routing only — not sing-box
+    // clear-forkop economy: VPN/AWG interfaces are NOT sing-box outbounds.
+    // Kernel path: routing.direct_path (fwmark + policy routing).
     return;
 }
+
+
 
 function parse_outbound_json(value) {
     try {
@@ -2773,8 +2776,9 @@ function add_combined_route_for_section(config, section) {
 
     add_fully_routed_ips_rules(config, section);
 
-    // Transport-only: no domain/IP/community rulesets in sing-box.
-    // Classification is nft (real IP sets); sing-box only inbound→outbound (add_service_route_rules).
+    // Economy transport-only: no domain/community rules in sing-box.
+    // Proxy sections: only inbound→outbound (selector). Classification = nft sets + marks.
+    // Interface sections never reach here (section_uses_singbox=false).
     if (economy)
         return;
 
@@ -2876,36 +2880,38 @@ function add_outbound_for_section(config, section, taken, sections) {
     if (unsupported_matcher != "")
         runtime_generate_unsupported("section has unsupported matcher " + unsupported_matcher);
 
-    // Proxy/subscription/JSON → full connection outbounds
-    // ByeDPI → thin SOCKS outbound only
-    // vpn / zapret / zapret2 → outside sing-box
-    if (section_is_byedpi(section))
-        add_byedpi_outbound(config, section, sections);
-    else if (section_uses_singbox(section))
-        add_connections_outbound(config, section, taken);
-    else if (action == "zapret" || action == "zapret2" || action == "vpn")
+    // VPN / Zapret / interface-only: outside sing-box (nft + policy routing)
+    if (action == "vpn" || action == "zapret" || action == "zapret2")
         return;
-    else if (action == "bypass") {
-        /* route-only action */
+    if (connections.is_connections_action(action)) {
+        if (!section_has_proxy_transport(section))
+            return; // AWG/WG only — kernel path
+        add_connections_outbound(config, section, taken);
+        return;
     }
-    else if (action == "block") {
-        /* route-only action */
+    if (action == "byedpi")
+        add_byedpi_outbound(config, section, sections);
+    else if (action == "bypass" || action == "block") {
+        /* route-only */
     }
-    else if (action == "dns") {
+    else if (action == "dns")
         add_dns_server_for_section(config, section);
-    }
-    else {
+    else
         runtime_generate_unsupported("unsupported action " + action);
-    }
 }
+
+
 
 function reserve_section_outbound_tags(sections, taken) {
     for (let section in sections) {
-        if (!section_uses_singbox(section))
+        let action = option(section, "action", "");
+        if (!section_uses_singbox(section) && action != "byedpi")
             continue;
         taken[outbound_tag(section[".name"])] = true;
-        let action = option(section, "action", "");
+
         if (!connections.is_connections_action(action))
+            continue;
+        if (!section_has_proxy_transport(section))
             continue;
 
         for (let urltest_id in connections.urltests(section))
@@ -2914,6 +2920,7 @@ function reserve_section_outbound_tags(sections, taken) {
             taken[priority_outbound_tag(section[".name"], group_id)] = true;
     }
 }
+
 
 function byedpi_inbound_tag() {
     return "tproxy-byedpi-in";
@@ -3058,28 +3065,34 @@ function add_global_transport_rules(config, settings, sections) {
 }
 
 function add_service_route_rules(config, sections) {
-    let proxy_sections = [];
+    // Prefer a section that actually has sing-box outbounds (proxy transport)
+    let first = null;
     for (let section in sections) {
-        if (section_is_proxy_transport(section))
-            push(proxy_sections, section);
+        if (!section_uses_singbox(section))
+            continue;
+        if (section_is_byedpi(section))
+            continue;
+        first = section;
+        break;
     }
-    if (length(proxy_sections) == 0)
-        return;
-
-    let first = proxy_sections[0];
-    push(config.route.rules, {
-        action: "route",
-        inbound: tproxy_inbound_matcher(),
-        outbound: outbound_tag(first[".name"]),
-        domain: runtime_constants.CHECK_PROXY_IP_DOMAIN
-    });
-    // Short catch-all: TPROXY inbound → first proxy outbound (nft classifies who enters TPROXY)
-    push(config.route.rules, {
-        action: "route",
-        inbound: tproxy_inbound_matcher(),
-        outbound: outbound_tag(first[".name"])
-    });
+    if (first == null) {
+        for (let section in sections) {
+            if (section_is_byedpi(section)) {
+                first = section;
+                break;
+            }
+        }
+    }
+    if (first != null) {
+        push(config.route.rules, {
+            action: "route",
+            inbound: tproxy_inbound_matcher(),
+            outbound: outbound_tag(first[".name"]),
+            domain: runtime_constants.CHECK_PROXY_IP_DOMAIN
+        });
+    }
 }
+
 
 function deferred_section_set(value) {
     let result = {};
