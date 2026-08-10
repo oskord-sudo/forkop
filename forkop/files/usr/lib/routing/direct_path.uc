@@ -274,12 +274,15 @@ function apply_vpn_interface_routing(table, interface_set, localv4, localv6) {
         }
 
         let names = section_set_names(name);
+        // Domain/community traffic: PROXY mark → TPROXY → sing-box → bind_interface (reliable)
+        // Static subnet sets: also PROXY mark so sing-box sees them via sniff/IP rules
+        let proxy_mark = getenv("NFT_PROXY_MARK") || "0x04000000";
         for (let set4 in [ names.v4, names.eco4 ]) {
             nft_add_rule(table, "priority_rules", [
                 "iifname", "@" + interface_set,
                 "ip", "daddr", "@" + set4,
                 "ip", "daddr", "!=", "@" + localv4,
-                "meta", "mark", "set", mark, "counter"
+                "meta", "mark", "set", proxy_mark, "counter"
             ]);
         }
         for (let set6 in [ names.v6, names.eco6 ]) {
@@ -287,29 +290,60 @@ function apply_vpn_interface_routing(table, interface_set, localv4, localv6) {
                 "iifname", "@" + interface_set,
                 "ip6", "daddr", "@" + set6,
                 "ip6", "daddr", "!=", "@" + localv6,
-                "meta", "mark", "set", mark, "counter"
+                "meta", "mark", "set", proxy_mark, "counter"
             ]);
         }
 
-        // policy routing
+        // Keep policy routing + masquerade as fallback for any residual marked traffic
         run_args_quiet([ "ip", "-4", "rule", "del", "fwmark", mark + "/" + mark, "table", table_name ]);
         run_args_quiet([ "ip", "-6", "rule", "del", "fwmark", mark + "/" + mark, "table", table_name ]);
         run_args([ "ip", "-4", "rule", "add", "fwmark", mark + "/" + mark, "table", table_name, "priority", as_string(120 + idx) ]);
         run_args([ "ip", "-6", "rule", "add", "fwmark", mark + "/" + mark, "table", table_name, "priority", as_string(120 + idx) ]);
-
         run_args_quiet([ "ip", "route", "flush", "table", table_name ]);
         run_args_quiet([ "ip", "-6", "route", "flush", "table", table_name ]);
         if (iface_up(iface)) {
             run_args([ "ip", "route", "replace", "default", "dev", iface, "table", table_name ]);
             run_args_quiet([ "ip", "-6", "route", "replace", "default", "dev", iface, "table", table_name ]);
-            // SNAT: LAN clients must appear as tunnel address on AWG/WG
             ensure_vpn_masquerade(table, iface);
-            log_msg("vpn " + name + " → " + iface + " mark=" + mark + " table=" + table_name);
+            log_msg("vpn " + name + " → " + iface + " (TPROXY/proxy_mark + bind_interface) table=" + table_name);
         } else {
             log_msg("vpn iface " + iface + " not up yet for section " + name);
         }
     }
-    return true;
+    
+    // VPN + community/domain: without FakeIP, CDN IPs change constantly.
+    // Send LAN web traffic to TPROXY; sing-box sniffs SNI and matches rule_set → bind_interface.
+    let need_web_tproxy = false;
+    for (let section in sections) {
+        if (section_action_of(section) != "vpn")
+            continue;
+        let n = section[".name"];
+        let cl = as_string(uci_core.get(CONFIG_NAME + "." + n + ".community_lists"));
+        let dm = as_string(uci_core.get(CONFIG_NAME + "." + n + ".domain"));
+        let ds = as_string(uci_core.get(CONFIG_NAME + "." + n + ".domain_suffix"));
+        if (cl != "" || dm != "" || ds != "") {
+            need_web_tproxy = true;
+            break;
+        }
+    }
+    if (need_web_tproxy) {
+        let proxy_mark = getenv("NFT_PROXY_MARK") || "0x04000000";
+        nft_add_rule(table, "priority_rules", [
+            "iifname", "@" + interface_set,
+            "ip", "daddr", "!=", "@" + localv4,
+            "tcp", "dport", "{ 80, 443 }",
+            "meta", "mark", "set", proxy_mark, "counter"
+        ]);
+        nft_add_rule(table, "priority_rules", [
+            "iifname", "@" + interface_set,
+            "ip", "daddr", "!=", "@" + localv4,
+            "udp", "dport", "{ 443 }",
+            "meta", "mark", "set", proxy_mark, "counter"
+        ]);
+        log_msg("vpn web-ports → TPROXY (SNI/rule_set → bind_interface)");
+    }
+
+return true;
 }
 
 /**
