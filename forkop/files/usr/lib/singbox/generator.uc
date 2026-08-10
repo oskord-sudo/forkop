@@ -75,16 +75,19 @@ function section_uses_singbox(section) {
     let action = option(section, "action", "");
     if (action == "byedpi")
         return true;
-    if (action == "zapret" || action == "zapret2" || action == "vpn")
+    if (action == "zapret" || action == "zapret2")
         return false;
     if (action == "bypass" || action == "block" || action == "dns")
         return false;
-    // Only real proxy transport goes through sing-box (URLs/subs/JSON).
-    // Interface-only (AWG/WG) → kernel policy routing via routing.direct_path.
+    // VPN (AWG/WG): sing-box direct outbound with bind_interface (reliable; original Forkop path)
+    if (action == "vpn")
+        return length(connections.interfaces(section)) > 0;
+    // Proxy connection: only if has proxy transport
     if (connections.is_connections_action(action))
         return section_has_proxy_transport(section);
     return false;
 }
+
 
 
 
@@ -2148,10 +2151,11 @@ function add_interface_connection_outbound(config, state, section, interface_ind
 }
 
 function add_connection_interfaces(config, state, section, taken, selector_tags, urltest_candidate_tags) {
-    // clear-forkop economy: VPN/AWG interfaces are NOT sing-box outbounds.
-    // Kernel path: routing.direct_path (fwmark + policy routing).
-    return;
+    let items = connections.interfaces(section);
+    for (let i = 0; i < length(items); i++)
+        add_interface_connection_outbound(config, state, section, i + 1, items[i], taken, selector_tags, urltest_candidate_tags);
 }
+
 
 
 
@@ -2776,11 +2780,20 @@ function add_combined_route_for_section(config, section) {
 
     add_fully_routed_ips_rules(config, section);
 
-    // Economy transport-only: no domain/community rules in sing-box.
-    // Proxy sections: only inbound→outbound (selector). Classification = nft sets + marks.
-    // Interface sections never reach here (section_uses_singbox=false).
-    if (economy)
+    // Economy: proxy sections = no bulk domain lists in sing-box.
+    // VPN sections: keep community rule_sets (youtube/telegram) so bind_interface outbounds are used.
+    let action_now = option(section, "action", "");
+    if (economy && action_now != "vpn") {
+        // proxy transport-only: service routes only (BT/calls already added above)
         return;
+    }
+    if (economy && action_now == "vpn") {
+        domain = [];
+        domain_suffix = [];
+        domain_keyword = [];
+        domain_regex = [];
+        ip_cidr = [];
+    }
 
     for (let community in connections.community_lists(section)) {
         let ensured = ensure_community_ruleset(config, section_name, as_string(community));
@@ -2880,12 +2893,18 @@ function add_outbound_for_section(config, section, taken, sections) {
     if (unsupported_matcher != "")
         runtime_generate_unsupported("section has unsupported matcher " + unsupported_matcher);
 
-    // VPN / Zapret / interface-only: outside sing-box (nft + policy routing)
-    if (action == "vpn" || action == "zapret" || action == "zapret2")
+    if (action == "zapret" || action == "zapret2")
         return;
+    // VPN: interface outbounds via sing-box bind_interface
+    if (action == "vpn") {
+        if (length(connections.interfaces(section)) == 0)
+            return;
+        add_connections_outbound(config, section, taken);
+        return;
+    }
     if (connections.is_connections_action(action)) {
         if (!section_has_proxy_transport(section))
-            return; // AWG/WG only — kernel path
+            return;
         add_connections_outbound(config, section, taken);
         return;
     }
@@ -2899,6 +2918,7 @@ function add_outbound_for_section(config, section, taken, sections) {
     else
         runtime_generate_unsupported("unsupported action " + action);
 }
+
 
 
 
