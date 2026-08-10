@@ -7,6 +7,8 @@ let uci_core = require("core.uci");
 let rule_config = require("config.rule");
 let domain_config = require("config.domain");
 let connections = require("config.connections");
+let direct_path = null;
+try { direct_path = require("routing.direct_path"); } catch (e) { direct_path = null; }
 let routing_rulesets = require("routing.rulesets");
 let runtime_constants = require("singbox.constants");
 const CONFIG_NAME = getenv("FORKOP_CONFIG_NAME") || "forkop";
@@ -33,7 +35,7 @@ function nft_proxy_mark(fakeip_mark) {
     mark = getenv("NFT_FAKEIP_MARK");
     if (mark != null && as_string(mark) != "")
         return as_string(mark);
-    return as_string(fakeip_mark || "0x05000000");
+    return as_string(fakeip_mark || "0x04000000");
 }
 
 function forkop_section_names() {
@@ -74,23 +76,11 @@ function nft_create_economy_section_sets(table) {
 }
 
 function nft_add_economy_domain_capture_rules(table, interface_set, mark) {
-    interface_set = as_string(interface_set || "forkop_interfaces");
-    mark = as_string(mark);
-    for (let name in forkop_section_names()) {
-        let safe = replace(as_string(name), /[^A-Za-z0-9_]/g, "_");
-        if (length(safe) > 40)
-            safe = substr(safe, 0, 40);
-        let set4 = "eco_" + safe + "_v4";
-        let set6 = "eco_" + safe + "_v6";
-        if (!nft_add_rule(table, "prerouting",
-                "iifname @" + interface_set + " ip daddr @" + set4 + " meta mark set " + mark + " counter"))
-            return false;
-        if (!nft_add_rule(table, "prerouting",
-                "iifname @" + interface_set + " ip6 daddr @" + set6 + " meta mark set " + mark + " counter"))
-            return false;
-    }
+    // Intentionally empty: interface/VPN marks come from routing.direct_path
+    // (per-section marks + policy routing). Proxy TPROXY mark is only for proxy sets.
     return true;
 }
+
 
 function arg_bool(value) {
     value = lc(as_string(value));
@@ -940,6 +930,13 @@ function nft_create_runtime_base(table, localv4_set, common_set, port_set, ip_po
 
     if (!nft_create_economy_section_sets(table))
         return false;
+    if (direct_path != null) {
+        let iface_set = as_string(interface_set || "forkop_interfaces");
+        let lv4 = as_string(localv4_set || "localv4");
+        let lv6 = as_string(localv6_set || "localv6");
+        if (!direct_path.apply_all_direct_paths(table, iface_set, lv4, lv6))
+            log_message("warn", "direct_path apply failed");
+    }
     if (!nft_add_economy_domain_capture_rules(table, interface_set, fakeip_mark))
         return false;
 

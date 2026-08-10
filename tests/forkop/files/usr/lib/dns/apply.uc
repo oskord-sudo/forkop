@@ -227,6 +227,19 @@ function remove_economy_conf_files() {
 /**
  * Economy: point dnsmasq at https-dns-proxy, generate nftset conf, ensure service up.
  */
+
+function ensure_dnsmasq_confdir_tmp() {
+    // option confdir (not list). Only set if empty.
+    let cur = as_string(uci_get("dhcp.@dnsmasq[0].confdir"));
+    if (cur != "")
+        return true;
+    system("mkdir -p /tmp/dnsmasq.d");
+    // use uci set via shell to avoid heavy deps
+    system("uci -q set dhcp.@dnsmasq[0].confdir=/tmp/dnsmasq.d && uci -q commit dhcp");
+    system("/etc/init.d/dnsmasq reload >/dev/null 2>&1");
+    return true;
+}
+
 function dnsmasq_configure_economy() {
     // Do not modify /etc/config/dhcp or dnsmasq UCI.
     // Optional: write domain→nftset conf into existing conf.d if present (no UCI commit).
@@ -240,6 +253,8 @@ function dnsmasq_configure_economy() {
         else
             log("Economy nftset conf generation skipped or failed", "info");
     }
+    // Ensure dnsmasq reads /tmp/dnsmasq.d without rewriting whole DHCP
+    ensure_dnsmasq_confdir_tmp();
     return true;
 }
 

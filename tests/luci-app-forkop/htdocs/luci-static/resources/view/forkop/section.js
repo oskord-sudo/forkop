@@ -3877,11 +3877,11 @@ function getActionOptionLabel(action) {
     case "bypass":
       return "Bypass";
     case "connection":
-      return "Connection";
+      return _("Proxy");
     case "dns":
       return "DNS";
     case "vpn":
-      return "VPN";
+      return _("VPN");
     case "zapret":
       return "Zapret";
     case "zapret2":
@@ -3923,6 +3923,7 @@ function populateActionOptionValues(option) {
   delete option.vallist;
 
   option.value("connection", getActionOptionLabel("connection"));
+  option.value("vpn", getActionOptionLabel("vpn"));
   option.value("bypass", "Bypass");
   option.value("block", "Block");
   option.value("dns", "DNS");
@@ -7102,7 +7103,7 @@ function createSectionContent(section) {
     _("Network Interface"),
     _("Select network interface for VPN connection"),
   );
-  o.depends("action", "connection");
+  o.depends("action", "vpn");
   o.rmempty = true;
   o.modalonly = true;
   o.placeholder = _("Select a network interface");

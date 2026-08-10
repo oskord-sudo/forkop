@@ -47,7 +47,7 @@ function constants_map() {
     c.NFT_DISCORD_SET_NAME = env("NFT_DISCORD_SET_NAME", "forkop_discord_subnets");
     c.NFT_DISCORD6_SET_NAME = env("NFT_DISCORD6_SET_NAME", "forkop_discord_subnets6");
     c.NFT_INTERFACE_SET_NAME = env("NFT_INTERFACE_SET_NAME", "forkop_interfaces");
-    c.NFT_PROXY_MARK = env("NFT_PROXY_MARK", "0x05000000");
+    c.NFT_PROXY_MARK = env("NFT_PROXY_MARK", "0x04000000");
     c.NFT_OUTBOUND_MARK = env("NFT_OUTBOUND_MARK", "0x08000000");
 
     c.SB_REQUIRED_VERSION = env("SB_REQUIRED_VERSION", "1.12.0");

@@ -2342,3 +2342,9 @@ msgstr "Только эти клиенты маршрутизируются Fork
 
 msgid "Proxied MAC clients"
 msgstr "Клиенты MAC через прокси"
+
+msgid "VPN"
+msgstr "VPN"
+
+msgid "Proxy"
+msgstr "Прокси"
