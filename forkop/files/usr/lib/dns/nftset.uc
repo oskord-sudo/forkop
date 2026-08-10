@@ -1,42 +1,27 @@
 #!/usr/bin/env ucode
 /**
- * Generate dnsmasq nftset= config so domain resolutions fill Forkop nft sets (economy).
+ * Economy: domain → nft set via dnsmasq nftset=
+ * Community services from itdoginfo/allow-domains Services/*.lst
  */
 
 let fs = require("fs");
-let uci = require("core.uci");
-let common = require("core.common");
-let rule_config = require("config.rule");
-let connections = require("config.connections");
 
 const CONFIG_NAME = getenv("FORKOP_CONFIG_NAME") || "forkop";
 const NFT_TABLE = getenv("NFT_TABLE_NAME") || "ForkopTable";
 const DNSMASQ_CONF_DIR = getenv("FORKOP_DNSMASQ_CONF_DIR") || "/tmp/dnsmasq.d";
 const NFTSET_CONF = DNSMASQ_CONF_DIR + "/forkop-economy-nftset.conf";
 const DOMAIN_LIST_DIR = getenv("FORKOP_DOMAIN_LIST_DIR") || "/tmp/forkop/domain-lists";
+const GITHUB_RAW_URL = getenv("GITHUB_RAW_URL") || "https://raw.githubusercontent.com/itdoginfo/allow-domains/main";
 
 function as_string(value) {
     return value == null ? "" : "" + value;
 }
 
-function option(section, key, fallback) {
-    return common.option(section, key, fallback);
-}
-
-function list_option(section, key) {
-    return common.list_option(section, key);
-}
-
-function bool_option(section, key, fallback) {
-    return common.bool_option(section, key, fallback);
-}
-
 function ensure_dir(path) {
-    return system("mkdir -p " + "'" + replace(as_string(path), /'/g, "'\\''") + "'") == 0;
+    return system("mkdir -p '" + replace(as_string(path), /'/g, "'\\''") + "'") == 0;
 }
 
 function set_name_for_section(section_name, family) {
-    // nft set names: limited charset
     let safe = replace(as_string(section_name), /[^A-Za-z0-9_]/g, "_");
     if (length(safe) > 40)
         safe = substr(safe, 0, 40);
@@ -47,132 +32,87 @@ function normalize_domain(value) {
     value = lc(trim(as_string(value)));
     value = replace(value, /^\.+/, "");
     value = replace(value, /\.$/, "");
-    // strip full:/keyword:/regex: for nftset — only plain suffix domains
     if (index(value, "regex:") == 0 || index(value, "keyword:") == 0)
         return "";
     if (index(value, "full:") == 0)
         value = substr(value, 5);
     if (value == "" || index(value, "/") >= 0 || index(value, " ") >= 0)
         return "";
+    if (match(value, /^[0-9]+(\.[0-9]+){3}(\/[0-9]+)?$/))
+        return "";
     return value;
 }
 
-function collect_section_domains(section) {
-    let domains = [];
-    let seen = {};
-
-    function add(v) {
-        v = normalize_domain(v);
-        if (v == "" || seen[v])
-            return;
-        seen[v] = true;
-        push(domains, v);
-    }
-
-    for (let v in list_option(section, "domain"))
-        add(v);
-    for (let v in list_option(section, "domain_suffix"))
-        add(v);
-    for (let v in rule_config.text_list_values(option(section, "domain_text", ""), "comma-space"))
-        add(v);
-    for (let v in rule_config.text_list_values(option(section, "domain_suffix_text", ""), "comma-space"))
-        add(v);
-
-    // domain_ip_lists local files — read line by line if small path list
-    for (let path in list_option(section, "domain_ip_lists")) {
-        path = as_string(path);
-        if (path == "" || !match(path, /^\//))
-            continue;
+function download_community_lst(service) {
+    service = as_string(service);
+    if (service == "")
+        return null;
+    ensure_dir(DOMAIN_LIST_DIR);
+    let path = DOMAIN_LIST_DIR + "/" + service + ".lst";
+    let url = GITHUB_RAW_URL + "/Services/" + service + ".lst";
+    let st = fs.stat(path);
+    let need = st == null;
+    if (!need) {
         let data = fs.readfile(path);
-        if (data == null)
-            continue;
-        for (let line in split(data, "\n")) {
-            line = replace(line, /#.*$/, "");
-            line = trim(line);
-            if (line != "")
-                add(line);
-        }
+        if (data == null || length(trim(as_string(data))) == 0)
+            need = true;
     }
-
-    return domains;
+    if (need)
+        system("wget -q -O '" + replace(path, /'/g, "'\\''") + "' '" + replace(url, /'/g, "'\\''") + "' 2>/dev/null");
+    if (fs.stat(path) == null)
+        return null;
+    return path;
 }
 
-function section_needs_nftset(section) {
-    if (!bool_option(section, "enabled", true))
-        return false;
-    let action = option(section, "action", "");
-    // proxy / vpn / zapret / block — all can use domain→IP sets
-    return action == "connection" || action == "proxy" || action == "outbound" ||
-        action == "vpn" || action == "zapret" || action == "zapret2" ||
-        action == "byedpi" || action == "block" || action == "bypass";
+function add_domains_from_file(path, add_dom) {
+    let data = fs.readfile(path);
+    if (data == null)
+        return;
+    for (let line in split(as_string(data), "\n")) {
+        line = trim(replace(line, /#.*$/, ""));
+        if (line == "")
+            continue;
+        if (match(line, /^[0-9a-fA-F:.]+(\/[0-9]+)?$/))
+            continue;
+        add_dom(line);
+    }
 }
 
-/**
- * Write dnsmasq conf with nftset= lines.
- * Format (dnsmasq 2.90+ / OpenWrt):
- *   nftset=/example.com/example.org/4#inet#ForkopTable#eco_sec_v4
- *   nftset=/example.com/example.org/6#inet#ForkopTable#eco_sec_v6
- */
+function section_names_list() {
+    let names = [];
+    let p = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | grep '=section$' | cut -d. -f2 | cut -d= -f1", "r");
+    let raw = p != null ? p.read("all") : "";
+    if (p != null)
+        p.close();
+    for (let n in split(as_string(raw), "\n")) {
+        n = trim(n);
+        if (n != "" && n != "settings")
+            push(names, n);
+    }
+    return names;
+}
+
+function uci_get(key) {
+    let p = fs.popen("uci -q get " + key + " 2>/dev/null", "r");
+    let v = p != null ? trim(as_string(p.read("all"))) : "";
+    if (p != null)
+        p.close();
+    return v;
+}
+
 function generate_nftset_conf() {
     ensure_dir(DNSMASQ_CONF_DIR);
     ensure_dir(DOMAIN_LIST_DIR);
 
     let lines = [];
-    push(lines, "# Generated by Forkop economy mode — do not edit");
-    push(lines, "# Domains resolved via dnsmasq (→ https-dns-proxy) fill nft sets");
+    push(lines, "# Generated by Forkop economy — domain → nft set");
 
-    let sections = [];
-    if (uci.available()) {
-        // load sections via uci show parse
-        let pipe = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null", "r");
-        let raw = pipe != null ? pipe.read("all") : "";
-        if (pipe != null)
-            pipe.close();
-        // simpler: use foreach if cursor available
-    }
-
-    let cursor_ok = false;
-    try {
-        let common_uci = require("core.uci");
-        // iterate using shell
-    } catch (e) {
-    }
-
-    // Use uci export of each section via system
-    let names_out = "";
-    let p = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | sed -n \"s/^" + CONFIG_NAME + "\\.\\([^=]*\\)=section$/\\1/p\"", "r");
-    if (p != null) {
-        names_out = p.read("all");
-        p.close();
-    }
-
-    let section_names = [];
-    for (let n in split(as_string(names_out), "\n")) {
-        n = trim(n);
-        if (n != "")
-            push(section_names, n);
-    }
-
-    // Fallback: parse type=section
-    if (length(section_names) == 0) {
-        p = fs.popen("uci -q show " + CONFIG_NAME + " 2>/dev/null | grep \"=section$\" | cut -d. -f2 | cut -d= -f1", "r");
-        if (p != null) {
-            names_out = p.read("all");
-            p.close();
-        }
-        for (let n in split(as_string(names_out), "\n")) {
-            n = trim(n);
-            if (n != "" && n != "settings")
-                push(section_names, n);
-        }
-    }
-
-    for (let name in section_names) {
-        let enabled = uci.get(CONFIG_NAME + "." + name + ".enabled");
-        if (enabled == "0" || enabled == "false")
+    for (let name in section_names_list()) {
+        let ev = uci_get(CONFIG_NAME + "." + name + ".enabled");
+        if (ev == "0" || ev == "false")
             continue;
-        let action = as_string(uci.get(CONFIG_NAME + "." + name + ".action"));
-        if (action == "" || action == "dns")
+        let action = uci_get(CONFIG_NAME + "." + name + ".action");
+        if (action == "dns")
             continue;
 
         let domains = [];
@@ -186,50 +126,17 @@ function generate_nftset_conf() {
         }
 
         for (let key in ["domain", "domain_suffix"]) {
-            let raw_list = uci.get(CONFIG_NAME + "." + name + "." + key);
-            for (let v in split(as_string(raw_list), /[ \t\n]/))
-                add_dom(v);
-        }
-        // list items may appear as domain_suffix= multiple times in show
-        p = fs.popen("uci -q get " + CONFIG_NAME + "." + name + ".domain 2>/dev/null; uci -q get " + CONFIG_NAME + "." + name + ".domain_suffix 2>/dev/null", "r");
-        if (p != null) {
-            let got = p.read("all");
-            p.close();
-            for (let v in split(as_string(got), /[ \t\n]/))
+            for (let v in split(uci_get(CONFIG_NAME + "." + name + "." + key), /[ \t\n]/))
                 add_dom(v);
         }
 
-        // text fields
-        for (let key in ["domain_text", "domain_suffix_text"]) {
-            let text = as_string(uci.get(CONFIG_NAME + "." + name + "." + key));
-            for (let line in split(text, "
-")) {
-                line = replace(line, /#.*$/, "");
-                for (let v in split(line, /[ ,]/))
-                    add_dom(v);
-            }
-        }
-
-        // domain_ip_lists: files with domains and/or IPs — take domain lines only
-        let lists_raw = as_string(uci.get(CONFIG_NAME + "." + name + ".domain_ip_lists"));
-        for (let path in split(lists_raw, /[ 	
-]/)) {
-            path = trim(path);
-            if (path == "" || fs.stat(path) == null)
+        for (let svc in split(uci_get(CONFIG_NAME + "." + name + ".community_lists"), /[ \t\n]/)) {
+            svc = trim(svc);
+            if (svc == "")
                 continue;
-            let data = fs.readfile(path);
-            if (data == null)
-                continue;
-            for (let line in split(as_string(data), "
-")) {
-                line = trim(replace(line, /#.*$/, ""));
-                if (line == "")
-                    continue;
-                // skip pure IP/CIDR — those go to static nft, not dnsmasq
-                if (match(line, /^[0-9a-fA-F:.]+(\/[0-9]+)?$/))
-                    continue;
-                add_dom(line);
-            }
+            let lst = download_community_lst(svc);
+            if (lst != null)
+                add_domains_from_file(lst, add_dom);
         }
 
         if (length(domains) == 0)
@@ -237,8 +144,6 @@ function generate_nftset_conf() {
 
         let set4 = set_name_for_section(name, 4);
         let set6 = set_name_for_section(name, 6);
-
-        // dnsmasq limits line length — chunk domains
         let chunk = [];
         let chunk_size = 40;
         for (let i = 0; i < length(domains); i++) {
@@ -256,6 +161,8 @@ function generate_nftset_conf() {
     let body = join("\n", lines) + "\n";
     if (!fs.writefile(NFTSET_CONF, body))
         return { ok: false, path: NFTSET_CONF, error: "write failed" };
+
+    system("/etc/init.d/dnsmasq reload >/dev/null 2>&1 || killall -HUP dnsmasq 2>/dev/null");
     return { ok: true, path: NFTSET_CONF, lines: length(lines) };
 }
 
@@ -267,6 +174,6 @@ return {
     set_name_for_section,
     generate_nftset_conf,
     conf_path,
-    collect_section_domains,
-    normalize_domain
+    normalize_domain,
+    download_community_lst
 };

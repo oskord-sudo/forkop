@@ -14,7 +14,7 @@ let uci_core = require("core.uci");
 const CONFIG_NAME = getenv("FORKOP_CONFIG_NAME") || "forkop";
 const RT_TABLES = "/etc/iproute2/rt_tables";
 const VPN_TABLE_BASE = 120;
-const VPN_MARK_BASE = getenv("NFT_IFACE_MARK_BASE") || "0x06000000";
+const VPN_MARK_BASE = getenv("NFT_IFACE_MARK_BASE") || "0x20000000";
 const ZAPRET_MARK_BASE = getenv("ZAPRET_ROUTE_MARK_BASE") || "0x01000000";
 const ZAPRET_QUEUE_BASE = getenv("ZAPRET_QUEUE_BASE") || "4000";
 const ZAPRET2_MARK_BASE = getenv("ZAPRET2_ROUTE_MARK_BASE") || "0x02000000";
@@ -214,6 +214,18 @@ function iface_up(name) {
 /**
  * VPN/AWG: mark matching traffic → ip rule → table with default via iface.
  */
+
+function ensure_vpn_masquerade(table, iface) {
+    iface = as_string(iface);
+    table = as_string(table);
+    if (iface == "" || table == "")
+        return false;
+    // NAT chain for SNAT of LAN traffic leaving VPN/AWG iface
+    system("nft add chain inet " + table + " postrouting '{ type nat hook postrouting priority srcnat; policy accept; }' 2>/dev/null");
+    // Add masquerade (duplicate rules are harmless; flush chain only on full rebuild)
+    return system("nft add rule inet " + table + " postrouting oifname " + iface + " masquerade 2>/dev/null") == 0;
+}
+
 function apply_vpn_interface_routing(table, interface_set, localv4, localv6) {
     let sections = uci_enabled_sections();
     let idx = 0;
@@ -288,8 +300,10 @@ function apply_vpn_interface_routing(table, interface_set, localv4, localv6) {
         run_args_quiet([ "ip", "route", "flush", "table", table_name ]);
         run_args_quiet([ "ip", "-6", "route", "flush", "table", table_name ]);
         if (iface_up(iface)) {
-            run_args([ "ip", "route", "add", "default", "dev", iface, "table", table_name ]);
-            run_args_quiet([ "ip", "-6", "route", "add", "default", "dev", iface, "table", table_name ]);
+            run_args([ "ip", "route", "replace", "default", "dev", iface, "table", table_name ]);
+            run_args_quiet([ "ip", "-6", "route", "replace", "default", "dev", iface, "table", table_name ]);
+            // SNAT: LAN clients must appear as tunnel address on AWG/WG
+            ensure_vpn_masquerade(table, iface);
             log_msg("vpn " + name + " → " + iface + " mark=" + mark + " table=" + table_name);
         } else {
             log_msg("vpn iface " + iface + " not up yet for section " + name);
