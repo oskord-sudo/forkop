@@ -2768,8 +2768,11 @@ function add_fully_routed_ips_rules(config, section) {
 function add_combined_route_for_section(config, section) {
     let economy = is_economy_settings(null);
     let domains = domain_conditions(section);
-    let domain = economy ? [] : domains.domain;
-    let domain_suffix = economy ? [] : domains.domain_suffix;
+    // Economy still needs explicit domains + community rule_sets so TPROXY'd
+    // traffic (web ports / nft sets) is classified to the correct outbound.
+    // Skip only heavy keyword/regex matchers to keep config light.
+    let domain = domains.domain;
+    let domain_suffix = domains.domain_suffix;
     let domain_keyword = economy ? [] : domains.domain_keyword;
     let domain_regex = economy ? [] : domains.domain_regex;
     let ip_cidr = legacy_condition_values(section, "ip_cidr");
@@ -2778,23 +2781,48 @@ function add_combined_route_for_section(config, section) {
     let dns_rule_set_tags = [];
     let section_name = section[".name"];
 
+    // Force option/list domain into matchers (UCI option domain 'x' is a string, not array)
+    function push_unique(arr, value) {
+        value = trim(as_string(value));
+        if (value == "" || index(value, "/") >= 0)
+            return;
+        for (let existing in arr)
+            if (existing == value)
+                return;
+        push(arr, value);
+    }
+    for (let value in list_option(section, "domain"))
+        push_unique(domain_suffix, value);
+    push_unique(domain_suffix, option(section, "domain", ""));
+    for (let value in list_option(section, "domain_suffix"))
+        push_unique(domain_suffix, value);
+    push_unique(domain_suffix, option(section, "domain_suffix", ""));
+
+    // Community subnet lists → ip_cidr (Telegram DC etc. connect by IP, not SNI)
+    let github_raw = getenv("GITHUB_RAW_URL") || "https://raw.githubusercontent.com/itdoginfo/allow-domains/main";
+    system("mkdir -p /tmp/forkop/subnets");
+    for (let community in connections.community_lists(section)) {
+        let cname = as_string(community);
+        if (cname == "")
+            continue;
+        let path = "/tmp/forkop/subnets/" + cname + ".ipv4.lst";
+        if (fs.stat(path) == null)
+            system("wget -q -O '" + path + "' '" + github_raw + "/Subnets/IPv4/" + cname + ".lst' 2>/dev/null");
+        let data = fs.readfile(path);
+        if (data == null)
+            continue;
+        for (let line in split(as_string(data), "\n")) {
+            line = trim(replace(line, /#.*$/, ""));
+            if (line == "")
+                continue;
+            if (match(line, /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/))
+                push_unique(ip_cidr, line);
+        }
+    }
+
     add_fully_routed_ips_rules(config, section);
 
-    // Economy: proxy sections = no bulk domain lists in sing-box.
-    // VPN sections: keep community rule_sets (youtube/telegram) so bind_interface outbounds are used.
-    let action_now = option(section, "action", "");
-    if (economy && action_now != "vpn") {
-        // proxy transport-only: service routes only (BT/calls already added above)
-        return;
-    }
-    if (economy && action_now == "vpn") {
-        domain = [];
-        domain_suffix = [];
-        domain_keyword = [];
-        domain_regex = [];
-        ip_cidr = [];
-    }
-
+    // FIX-2.0.15: community rule_sets + explicit domains + community IP CIDRs for proxy AND vpn
     for (let community in connections.community_lists(section)) {
         let ensured = ensure_community_ruleset(config, section_name, as_string(community));
         push(rule_set_tags, ensured.tag);
@@ -2970,7 +2998,7 @@ function add_route_for_section(config, section, sections) {
     }
     if (!section_uses_singbox(section))
         return;
-    // Proxy: no large lists in SB (economy early-return inside)
+    // Proxy + VPN: community rule_sets and explicit domains → section outbound
     add_combined_route_for_section(config, section);
 }
 
