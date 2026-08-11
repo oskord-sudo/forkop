@@ -4604,7 +4604,10 @@ function renderAnnotatedTextareaOverlay(value, annotations) {
     }
 
     html += escapeHtml(text.slice(cursor, annotation.start));
-    html += `<span class="fkp-annotated-textarea__invalid">${escapeHtml(
+    const title = annotation.message
+      ? ` title="${escapeHtml(annotation.message)}"`
+      : "";
+    html += `<span class="fkp-annotated-textarea__invalid"${title}>${escapeHtml(
       text.slice(annotation.start, annotation.end),
     )}</span>`;
     cursor = annotation.end;
@@ -4826,7 +4829,166 @@ function parseCommentAwareListTokens(value) {
   return tokens;
 }
 
+/* FIX-2.0.18 cross-section domain/ip hints */
+function sectionDisplayLabel(section_id) {
+  const label = uci.get(UCI_PACKAGE, section_id, "label");
+  if (label) {
+    return `${label}`;
+  }
+  return `${section_id}`;
+}
+
+function sectionIsEnabled(section_id) {
+  const value = uci.get(UCI_PACKAGE, section_id, "enabled");
+  if (value === null || value === undefined || value === "") {
+    return true;
+  }
+  return value === "1" || value === 1 || value === true;
+}
+
+function collectSectionListValues(section_id, keys) {
+  const values = [];
+  keys.forEach((key) => {
+    getConfigListValues(section_id, key).forEach((value) => {
+      values.push(`${value}`);
+    });
+    const textValue =
+      uci.get(UCI_PACKAGE, section_id, key) ||
+      uci.get(UCI_PACKAGE, section_id, `${key}_text`);
+    if (textValue && typeof textValue === "string" && textValue.length) {
+      parseCommentAwareListTokens(textValue).forEach((token) => {
+        values.push(token.value);
+      });
+    }
+  });
+  return values;
+}
+
+function buildCrossSectionValueIndex(optionKeys, normalizeValue) {
+  const index = new Map();
+  const sections = uci.sections(UCI_PACKAGE, "section") || [];
+
+  sections.forEach((section) => {
+    const section_id = section[".name"];
+    if (!section_id) {
+      return;
+    }
+
+    const label = sectionDisplayLabel(section_id);
+    const enabled = sectionIsEnabled(section_id);
+    const action = `${uci.get(UCI_PACKAGE, section_id, "action") || ""}`;
+
+    collectSectionListValues(section_id, optionKeys).forEach((raw) => {
+      let value = `${raw || ""}`.trim();
+      if (!value || value.startsWith("#")) {
+        return;
+      }
+      const colonIndex = value.indexOf(":");
+      if (colonIndex > 0) {
+        const prefix = value.slice(0, colonIndex);
+        if (["full", "keyword", "regex"].includes(prefix)) {
+          value = value.slice(colonIndex + 1);
+        }
+      }
+      const normalized = normalizeValue ? normalizeValue(value) : value;
+      if (!normalized) {
+        return;
+      }
+      if (!index.has(normalized)) {
+        index.set(normalized, []);
+      }
+      const list = index.get(normalized);
+      if (!list.some((entry) => entry.id === section_id)) {
+        list.push({ id: section_id, label, enabled, action });
+      }
+    });
+  });
+
+  return index;
+}
+
+function crossSectionConflictMessage(entries, currentSectionId) {
+  const others = (entries || []).filter((entry) => entry.id !== currentSectionId);
+  if (!others.length) {
+    return null;
+  }
+
+  const parts = others.map((entry) => {
+    const state = entry.enabled ? "" : ` (${_("disabled")})`;
+    const action = entry.action ? `/${entry.action}` : "";
+    return `${entry.label}${action}${state}`;
+  });
+
+  return _("Already used in: %s").format(parts.join(", "));
+}
+
 function analyzeTextListValue(value, validateItem, emptyMessage, options = {}) {
+  const text = value ? `${value}` : "";
+  if (!text.length) {
+    return { valid: true, message: "", annotations: [] };
+  }
+
+  const tokens = parseCommentAwareListTokens(text);
+  if (!tokens.length) {
+    return { valid: false, message: emptyMessage, annotations: [] };
+  }
+
+  const duplicateMessage = options.duplicateMessage || getDuplicateValueText();
+  const annotationMap = new Map();
+  const errors = [];
+  const warnings = [];
+  const seen = new Set();
+
+  tokens.forEach((token) => {
+    if (typeof validateItem === "function") {
+      const validation = validateItem(token.value);
+      if (!validation.valid) {
+        errors.push(`${token.value}: ${validation.message}`);
+        addAnnotationIssue(annotationMap, token, validation.message);
+      }
+    }
+
+    let normalized = options.normalizeDuplicateValue
+      ? options.normalizeDuplicateValue(token.value)
+      : token.value;
+
+    if (!normalized) {
+      return;
+    }
+
+    if (seen.has(normalized)) {
+      errors.push(`${token.value}: ${duplicateMessage}`);
+      addAnnotationIssue(annotationMap, token, duplicateMessage);
+      return;
+    }
+
+    seen.add(normalized);
+
+    if (typeof options.crossSectionLookup === "function") {
+      const conflict = options.crossSectionLookup(token.value, normalized);
+      if (conflict) {
+        warnings.push(`${token.value}: ${conflict}`);
+        addAnnotationIssue(annotationMap, token, conflict);
+      }
+    }
+  });
+
+  if (!errors.length) {
+    return {
+      valid: true,
+      message: warnings.length
+        ? [getValidationHeaderText(), ...warnings].join("\n")
+        : "",
+      annotations: finalizeAnnotations(annotationMap),
+    };
+  }
+
+  return {
+    valid: false,
+    message: [getValidationHeaderText(), ...errors, ...warnings].join("\n"),
+    annotations: finalizeAnnotations(annotationMap),
+  };
+}) {
   const text = value ? `${value}` : "";
   if (!text.length) {
     return { valid: true, message: "", annotations: [] };
@@ -4879,7 +5041,7 @@ function analyzeTextListValue(value, validateItem, emptyMessage, options = {}) {
   };
 }
 
-function analyzeDomainSuffixText(value) {
+function analyzeDomainSuffixText(value, section_id) {
   const validateDomainCondition = (domain) => {
     const normalized = `${domain || ""}`.trim();
     if (normalized.includes("/")) {
@@ -4888,6 +5050,13 @@ function analyzeDomainSuffixText(value) {
 
     return main.validateDomain(normalized, true);
   };
+
+  const crossIndex = section_id
+    ? buildCrossSectionValueIndex(
+        ["domain", "domain_suffix", "domain_keyword", "domain_regex"],
+        (item) => `${item}`.toLowerCase(),
+      )
+    : null;
 
   return analyzeTextListValue(
     value,
@@ -4936,7 +5105,21 @@ function analyzeDomainSuffixText(value) {
     },
     _("At least one valid domain must be specified."),
     {
-      normalizeDuplicateValue: (item) => `${item}`.toLowerCase(),
+      normalizeDuplicateValue: (item) => {
+        const colonIndex = `${item}`.indexOf(":");
+        let body = item;
+        if (colonIndex > 0) {
+          const prefix = `${item}`.slice(0, colonIndex);
+          if (["full", "keyword", "regex"].includes(prefix)) {
+            body = `${item}`.slice(colonIndex + 1);
+          }
+        }
+        return `${body}`.toLowerCase();
+      },
+      crossSectionLookup: crossIndex
+        ? (_raw, normalized) =>
+            crossSectionConflictMessage(crossIndex.get(normalized), section_id)
+        : null,
     },
   );
 }
@@ -5012,13 +5195,23 @@ function loadCombinedDomainText(section_id) {
   return appendUniqueDomainTextValues(textValue, values);
 }
 
-function analyzeIpCidrText(value) {
+function analyzeIpCidrText(value, section_id) {
+  const crossIndex = section_id
+    ? buildCrossSectionValueIndex(["ip_cidr", "source_ip_cidr"], (item) =>
+        `${item}`.trim(),
+      )
+    : null;
+
   return analyzeTextListValue(
     value,
     (item) => main.validateSubnet(item),
     _("At least one valid IP or subnet must be specified."),
     {
       normalizeDuplicateValue: (item) => `${item}`.trim(),
+      crossSectionLookup: crossIndex
+        ? (_raw, normalized) =>
+            crossSectionConflictMessage(crossIndex.get(normalized), section_id)
+        : null,
     },
   );
 }
@@ -6377,7 +6570,9 @@ function configureTextareaOption(option, analyzer, remoteValidationAttacher) {
         node.dispatchEvent(new CustomEvent("widget-change", { bubbles: true }));
       });
       if (typeof analyzer === "function") {
-        attachAnnotatedTextarea(textarea, analyzer);
+        attachAnnotatedTextarea(textarea, (value) =>
+          analyzer(value, section_id),
+        );
       }
       if (typeof remoteValidationAttacher === "function") {
         remoteValidationAttacher(this, section_id, textarea);
@@ -6595,9 +6790,13 @@ function addTextConditionField(section, config) {
   o.textarea = true;
   o.modalonly = true;
   if (config.textAnalyze) {
-    o.validate = function (_section_id, value) {
-      const analysis = config.textAnalyze(value);
-      return analysis.valid ? true : analysis.message;
+    o.validate = function (section_id, value) {
+      const analysis = config.textAnalyze(value, section_id);
+      // Cross-section conflicts annotate in red but do not block save
+      if (!analysis.valid) {
+        return analysis.message;
+      }
+      return true;
     };
   } else if (config.textValidate) {
     o.validate = config.textValidate;

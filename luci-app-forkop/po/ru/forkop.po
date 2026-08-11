@@ -2348,3 +2348,9 @@ msgstr "VPN"
 
 msgid "Proxy"
 msgstr "Прокси"
+
+msgid "Already used in: %s"
+msgstr "Уже используется в: %s"
+
+msgid "disabled"
+msgstr "выкл."

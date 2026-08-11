@@ -10,6 +10,7 @@ let runtime_route = require("singbox.route");
 let runtime_rulesets = require("singbox.rulesets");
 let runtime_servers = require("singbox.servers");
 let runtime_subscription = require("singbox.subscription");
+let subscription_slots = require("subscription.slots");
 let runtime_url = require("core.url");
 let runtime_urltest = require("singbox.urltest");
 let source_rulesets = require("routing.rulesets");
@@ -775,6 +776,57 @@ function assert_unique_outbound_tags(config) {
     }
 }
 
+
+function apply_slots_filter(section_name, source_outbounds) {
+    // Refresh slots from full source list, then return only selected outbounds.
+    // Default clear-forkop mode: slots (not full subscription dump).
+    // Escape hatch: UCI option subscription_mode 'full'
+    try {
+        if (subscription_slots != null) {
+            let mode = subscription_slots.subscription_mode_from_settings({});
+            if (mode == "full")
+                return source_outbounds;
+        }
+    } catch (e) {
+    }
+
+    let slot_count = 3;
+    try {
+        if (subscription_slots != null && subscription_slots.slot_count_from_settings != null)
+            slot_count = subscription_slots.slot_count_from_settings({});
+    } catch (e) {
+    }
+    try {
+        if (subscription_slots != null)
+            subscription_slots.refresh_section_slots(section_name, source_outbounds, slot_count);
+    } catch (e) {
+        warn("slots refresh failed for ", section_name, "\n");
+    }
+    let selected = [];
+    try {
+        if (subscription_slots != null)
+            selected = subscription_slots.slots_outbounds_for_section(section_name);
+    } catch (e) {
+        selected = [];
+    }
+    if (length(selected) > 0)
+        return selected;
+    let fallback = [];
+    for (let outbound in array_or_empty(source_outbounds)) {
+        if (type(outbound) != "object")
+            continue;
+        let t = as_string(outbound.type || "");
+        if (t == "" || t == "direct" || t == "selector" || t == "urltest" || t == "block" || t == "dns")
+            continue;
+        if (as_string(outbound.server || "") == "")
+            continue;
+        push(fallback, outbound);
+        if (length(fallback) >= slot_count)
+            break;
+    }
+    return fallback;
+}
+
 function add_subscription_source_with_state(config, section, source_index, source_entry, taken, selector_tags, urltest_candidate_tags, state, show_metadata, include_urltest_groups, hide_urltest_group_outbounds, hide_detour_outbounds, node_prefix) {
     let section_name = section[".name"];
     let source_section = runtime_subscription.source_id(section_name, source_index);
@@ -787,6 +839,11 @@ function add_subscription_source_with_state(config, section, source_index, sourc
         return 0;
 
     let source_outbounds = runtime_subscription.read_source_outbounds(source_section);
+    if (length(source_outbounds) == 0)
+        return 0;
+
+    // clear-forkop: slots mode — only keep a few live nodes in sing-box config
+    source_outbounds = apply_slots_filter(section_name, source_outbounds);
     if (length(source_outbounds) == 0)
         return 0;
 
@@ -2781,22 +2838,43 @@ function add_combined_route_for_section(config, section) {
     let dns_rule_set_tags = [];
     let section_name = section[".name"];
 
-    // Force option/list domain into matchers (UCI option domain 'x' is a string, not array)
+    // Force option/list domain into matchers.
+    // UCI multiline option domain contains real newlines — must split, never push whole blob.
     function push_unique(arr, value) {
         value = trim(as_string(value));
         if (value == "" || index(value, "/") >= 0)
+            return;
+        // skip accidental multi-line blobs
+        if (index(value, "\n") >= 0 || index(value, "\r") >= 0)
             return;
         for (let existing in arr)
             if (existing == value)
                 return;
         push(arr, value);
     }
+    function push_domain_field(arr, raw) {
+        raw = as_string(raw);
+        if (raw == "")
+            return;
+        // split multiline / comma / space lists
+        for (let line in split(raw, "\n")) {
+            line = trim(replace(line, /#.*$/, ""));
+            if (line == "")
+                continue;
+            for (let part in split(line, /[,\s]+/)) {
+                part = trim(part);
+                if (part == "" || substr(part, 0, 1) == "#")
+                    continue;
+                push_unique(arr, part);
+            }
+        }
+    }
     for (let value in list_option(section, "domain"))
-        push_unique(domain_suffix, value);
-    push_unique(domain_suffix, option(section, "domain", ""));
+        push_domain_field(domain_suffix, value);
+    push_domain_field(domain_suffix, option(section, "domain", ""));
     for (let value in list_option(section, "domain_suffix"))
-        push_unique(domain_suffix, value);
-    push_unique(domain_suffix, option(section, "domain_suffix", ""));
+        push_domain_field(domain_suffix, value);
+    push_domain_field(domain_suffix, option(section, "domain_suffix", ""));
 
     // Community subnet lists → ip_cidr (Telegram DC etc. connect by IP, not SNI)
     let github_raw = getenv("GITHUB_RAW_URL") || "https://raw.githubusercontent.com/itdoginfo/allow-domains/main";
@@ -2822,7 +2900,32 @@ function add_combined_route_for_section(config, section) {
 
     add_fully_routed_ips_rules(config, section);
 
-    // FIX-2.0.15: community rule_sets + explicit domains + community IP CIDRs for proxy AND vpn
+    // FIX-2.0.17: community rule_sets + explicit domains + community IP CIDRs for proxy AND vpn
+    // Economy: drop pathological bulk ip_cidr aggregates (/0-/11) that belong in nft only.
+    if (economy && length(ip_cidr) > 0) {
+        let filtered = [];
+        for (let cidr in ip_cidr) {
+            cidr = trim(as_string(cidr));
+            if (cidr == "")
+                continue;
+            let slash = index(cidr, "/");
+            if (slash > 0) {
+                let pfx = int(substr(cidr, slash + 1), 10);
+                if (pfx >= 0 && pfx < 12)
+                    continue;
+            }
+            push(filtered, cidr);
+        }
+        // Hard cap to keep sing-box route rules small
+        if (length(filtered) > 64) {
+            let capped = [];
+            for (let i = 0; i < 64; i++)
+                push(capped, filtered[i]);
+            filtered = capped;
+        }
+        ip_cidr = filtered;
+    }
+
     for (let community in connections.community_lists(section)) {
         let ensured = ensure_community_ruleset(config, section_name, as_string(community));
         push(rule_set_tags, ensured.tag);
@@ -3225,6 +3328,83 @@ function add_server_routes(config, servers, sections) {
     }
 }
 
+
+function outbound_tag_of(outbound) {
+    return as_string(object_or_empty(outbound).tag || "");
+}
+
+function collect_referenced_outbound_tags(config) {
+    let refs = {};
+    function mark(tag) {
+        tag = as_string(tag);
+        if (tag != "")
+            refs[tag] = true;
+    }
+    function walk_list(list) {
+        for (let item in array_or_empty(list))
+            mark(item);
+    }
+
+    // Always keep core tags
+    for (let tag_name in keys(object_or_empty(runtime_constants.RESERVED_TAGS)))
+        mark(tag_name);
+    mark(runtime_constants.DIRECT_OUTBOUND_TAG);
+    mark(runtime_constants.BYPASS_OUTBOUND_TAG);
+
+    for (let rule in array_or_empty(object_or_empty(config.route).rules)) {
+        if (type(rule) != "object")
+            continue;
+        mark(rule.outbound);
+    }
+
+    for (let outbound in array_or_empty(config.outbounds)) {
+        if (type(outbound) != "object")
+            continue;
+        let t = lc(as_string(outbound.type || ""));
+        if (t == "selector" || t == "urltest") {
+            walk_list(outbound.outbounds);
+            mark(outbound.default);
+        }
+        mark(outbound.detour);
+    }
+
+    // DNS detours
+    for (let server in array_or_empty(object_or_empty(config.dns).servers)) {
+        if (type(server) == "object")
+            mark(server.detour);
+    }
+    return refs;
+}
+
+function prune_unreferenced_outbounds(config) {
+    // Drop leaf outbounds not referenced by any selector/urltest/route (saves RAM).
+    // Keep groups (selector/urltest) and anything still referenced.
+    let changed = true;
+    let removed = 0;
+    while (changed) {
+        changed = false;
+        let refs = collect_referenced_outbound_tags(config);
+        let next = [];
+        for (let outbound in array_or_empty(config.outbounds)) {
+            if (type(outbound) != "object")
+                continue;
+            let tag_name = outbound_tag_of(outbound);
+            let t = lc(as_string(outbound.type || ""));
+            let is_group = t == "selector" || t == "urltest";
+            if (tag_name == "" || is_group || refs[tag_name] ||
+                t == "direct" || t == "block" || t == "dns") {
+                push(next, outbound);
+                continue;
+            }
+            removed++;
+            changed = true;
+        }
+        config.outbounds = next;
+    }
+    if (removed > 0)
+        warn("pruned " + removed + " unreferenced subscription outbounds");
+}
+
 function generate_config(output_path, service_address, mwan3_active, supports_xhttp, deferred_sections) {
     runtime_supports_xhttp = supports_xhttp == null || as_string(supports_xhttp) == ""
         ? true
@@ -3285,6 +3465,7 @@ function generate_config(output_path, service_address, mwan3_active, supports_xh
         add_mixed_proxy_for_section(config, section, service_address);
 
     assert_unique_outbound_tags(config);
+    prune_unreferenced_outbounds(config);
     strip_internal_fields(config);
     if (!write_json_file(output_path, config)) {
         warn("failed to write ", output_path, "\n");

@@ -75,8 +75,34 @@ function default_dns_servers() {
     return [ "127.0.0.1#5053" ];
 }
 
+function economy_force_https_dns_proxy(settings) {
+    // clear-forkop economy: sing-box DNS must use https-dns-proxy, not UCI DoH lists
+    let mode = lc(trim(as_string(option(settings, "routing_mode", "economy"))));
+    if (mode != "" && mode != "economy")
+        return false;
+    let backend = lc(trim(as_string(option(settings, "economy_dns_backend", "https-dns-proxy"))));
+    return backend == "" || backend == "https-dns-proxy" || backend == "hybrid";
+}
+
 function state_template(settings) {
     let main_servers = [];
+    let bootstrap_servers = [];
+
+    if (economy_force_https_dns_proxy(settings)) {
+        // Prefer live https-dns-proxy instances; ignore legacy dns_server from old configs
+        main_servers = default_dns_servers();
+        bootstrap_servers = default_dns_servers();
+        return {
+            version: 1,
+            dns_type: "udp",
+            dns_detour: "",
+            main_servers,
+            bootstrap_servers,
+            main_index: 0,
+            bootstrap_index: 0
+        };
+    }
+
     for (let value in list_option(settings, "dns_server")) {
         value = trim(as_string(value));
         if (value != "")
@@ -85,7 +111,6 @@ function state_template(settings) {
     if (length(main_servers) == 0)
         main_servers = default_dns_servers();
 
-    let bootstrap_servers = [];
     for (let value in list_option(settings, "bootstrap_dns_server")) {
         value = trim(as_string(value));
         if (value != "")
