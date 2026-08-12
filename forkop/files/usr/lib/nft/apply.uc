@@ -75,9 +75,50 @@ function nft_create_economy_section_sets(table) {
     return true;
 }
 
-function nft_add_economy_domain_capture_rules(table, interface_set, mark) {
-    // Intentionally empty: interface/VPN marks come from routing.direct_path
-    // (per-section marks + policy routing). Proxy TPROXY mark is only for proxy sets.
+function nft_add_economy_domain_capture_rules(table, interface_set, localv4_set, localv6_set, mark) {
+    // Domain IPs in eco_* → TPROXY; web 80/443 → TPROXY for SNI (CF / nnmclub).
+    mark = nft_proxy_mark(mark);
+    let iface = as_string(interface_set || "forkop_interfaces");
+    let lv4 = as_string(localv4_set || "localv4");
+    let lv6 = as_string(localv6_set || "localv6");
+
+    for (let name in forkop_section_names()) {
+        let safe = replace(as_string(name), /[^A-Za-z0-9_]/g, "_");
+        if (length(safe) > 40)
+            safe = substr(safe, 0, 40);
+        let set4 = "eco_" + safe + "_v4";
+        let set6 = "eco_" + safe + "_v6";
+        if (!nft_add_rule(table, "priority_rules", [
+            "iifname", "@" + iface,
+            "ip", "daddr", "@" + set4,
+            "ip", "daddr", "!=", "@" + lv4,
+            "meta", "mark", "set", mark, "counter"
+        ]))
+            return false;
+        if (!nft_add_rule(table, "priority_rules", [
+            "iifname", "@" + iface,
+            "ip6", "daddr", "@" + set6,
+            "ip6", "daddr", "!=", "@" + lv6,
+            "meta", "mark", "set", mark, "counter"
+        ]))
+            return false;
+    }
+
+    if (!nft_add_rule(table, "priority_rules", [
+        "iifname", "@" + iface,
+        "ip", "daddr", "!=", "@" + lv4,
+        "tcp", "dport", "{", "80", ",", "443", "}",
+        "meta", "mark", "set", mark, "counter"
+    ]))
+        return false;
+    if (!nft_add_rule(table, "priority_rules", [
+        "iifname", "@" + iface,
+        "ip", "daddr", "!=", "@" + lv4,
+        "udp", "dport", "443",
+        "meta", "mark", "set", mark, "counter"
+    ]))
+        return false;
+
     return true;
 }
 
@@ -937,7 +978,7 @@ function nft_create_runtime_base(table, localv4_set, common_set, port_set, ip_po
         if (!direct_path.apply_all_direct_paths(table, iface_set, lv4, lv6))
             log_message("warn", "direct_path apply failed");
     }
-    if (!nft_add_economy_domain_capture_rules(table, interface_set, fakeip_mark))
+    if (!nft_add_economy_domain_capture_rules(table, interface_set, localv4_set, localv6_set, fakeip_mark))
         return false;
 
     return true;

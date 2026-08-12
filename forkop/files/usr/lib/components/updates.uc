@@ -2783,6 +2783,90 @@ function slots_refresh_stamp_path() {
     return "/tmp/forkop/slots/.last_refresh";
 }
 
+function slots_clash_controller() {
+    // Prefer loopback clash API if sing-box is up
+    let candidates = [ "127.0.0.1:9090", "192.168.1.1:9090" ];
+    for (let c in candidates) {
+        let rc = system("wget -q -T 1 -O /dev/null http://" + c + "/ 2>/dev/null");
+        if (rc == 0)
+            return c;
+    }
+    return "";
+}
+
+function slots_mark_slow_from_clash(slots_mod) {
+    let ctrl = slots_clash_controller();
+    if (ctrl == "")
+        return;
+
+    let reject = [];
+    let max_ms = 2000;
+    try {
+        max_ms = int(slots_mod.PROBE_MAX_MS || 2000);
+    } catch (e) {
+    }
+
+    // Read current slot files
+    let dir = "/tmp/forkop/slots";
+    let list = fs.lsdir(dir);
+    if (list == null)
+        return;
+
+    let url = "http://www.gstatic.com/generate_204";
+    for (let name in list) {
+        name = as_string(name);
+        if (name == "" || substr(name, 0, 1) == "." || !match(name, /\.json$/))
+            continue;
+        let data = null;
+        try {
+            data = json(fs.readfile(dir + "/" + name));
+        } catch (e) {
+            continue;
+        }
+        if (type(data) != "object")
+            continue;
+        for (let outbound in array_or_empty(data.outbounds)) {
+            let tag = as_string(outbound.tag || "");
+            if (tag == "")
+                continue;
+            // Clash API encodes name in path — use query form via proxies delay
+            let enc = replace(tag, / /g, "%20");
+            let out = "/tmp/forkop/slots/.delay_" + replace(tag, /[^A-Za-z0-9]/g, "_");
+            let cmd = "wget -q -T 3 -O " + out + " 'http://" + ctrl + "/proxies/" + enc + "/delay?timeout=" + max_ms + "&url=" + url + "' 2>/dev/null";
+            let rc = system(cmd);
+            let body = "";
+            try {
+                body = as_string(fs.readfile(out) || "");
+            } catch (e) {
+                body = "";
+            }
+            system("rm -f " + out);
+            let delay = -1;
+            if (rc == 0 && body != "") {
+                try {
+                    let j = json(body);
+                    delay = int(j.delay || -1);
+                } catch (e) {
+                    delay = -1;
+                }
+            }
+            // N/A or too slow → reject next selection
+            if (delay < 0 || delay > max_ms) {
+                push(reject, tag);
+                log_message("slots: reject slow/dead node '" + tag + "' delay=" + delay, "info");
+            }
+        }
+    }
+
+    if (length(reject) > 0) {
+        try {
+            slots_mod.save_reject_tags(reject);
+        } catch (e) {
+            log_message("slots: failed to save reject list", "warn");
+        }
+    }
+}
+
 function slots_refresh_if_due() {
     if (!slots_mode_enabled())
         return;
@@ -2801,12 +2885,15 @@ function slots_refresh_if_due() {
     if (last > 0 && (now - last) < interval)
         return;
 
-    // Trigger config regenerate + probe via service reload
     system("mkdir -p /tmp/forkop/slots");
     try {
         fs.writefile(stamp, sprintf("%d\n", now));
     } catch (e) {
     }
+
+    // Mark N/A and >2000ms nodes so next generate skips them
+    slots_mark_slow_from_clash(slots);
+
     log_message("slots: periodic refresh (interval " + interval + "s)", "info");
     system("/usr/bin/forkop reload >/dev/null 2>&1 &");
 }

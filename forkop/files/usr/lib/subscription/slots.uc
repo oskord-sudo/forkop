@@ -28,8 +28,9 @@ let read_json_file = common.read_json_file;
 
 const SLOTS_DIR = getenv("FORKOP_SLOTS_DIR") || "/tmp/forkop/slots";
 const DEFAULT_SLOT_COUNT = 10;
-const PROBE_TIMEOUT_SEC = 1;
-const PROBE_MAX_CANDIDATES = 40;
+const PROBE_TIMEOUT_SEC = 2;
+const PROBE_MAX_MS = 2000;
+const PROBE_MAX_CANDIDATES = 80;
 
 function trim(value) {
     return replace(replace(as_string(value), /^\s+/, ""), /\s+$/, "");
@@ -143,6 +144,34 @@ function tcp_probe_ms(host, port, timeout_sec) {
     return elapsed <= 0 ? 1 : elapsed * 1000;
 }
 
+function reject_path() {
+    return SLOTS_DIR + "/.reject.json";
+}
+
+function load_reject_tags() {
+    let data = read_json_file(reject_path());
+    let tags = {};
+    if (type(data) == "object" && type(data.tags) == "array") {
+        for (let t in data.tags)
+            tags[as_string(t)] = true;
+    }
+    return tags;
+}
+
+function save_reject_tags(tag_list) {
+    ensure_slots_dir();
+    let tags = [];
+    let seen = {};
+    for (let t in array_or_empty(tag_list)) {
+        t = as_string(t);
+        if (t == "" || seen[t])
+            continue;
+        seen[t] = true;
+        push(tags, t);
+    }
+    fs.writefile(reject_path(), sprintf("%J\n", { updated_at: time(), tags: tags }));
+}
+
 function probe_outbound(outbound) {
     if (!is_leaf_proxy_outbound(outbound))
         return { ok: false, ms: -1 };
@@ -151,15 +180,27 @@ function probe_outbound(outbound) {
     if (host == "" || port <= 0)
         return { ok: false, ms: -1 };
 
-    let start_ms = time();
-    // nc -z
+    // uptime-based timing (seconds with fraction if available)
+    let up1 = trim(as_string(fs.readfile("/proc/uptime") || "0"));
     let rc = system("nc -z -w " + PROBE_TIMEOUT_SEC + " " + shell_quote(host) + " " + port + " >/dev/null 2>&1");
+    let up2 = trim(as_string(fs.readfile("/proc/uptime") || "0"));
     if (rc != 0)
         return { ok: false, ms: -1 };
-    let ms = (time() - start_ms);
+
+    let s1 = int(split(up1, " ")[0]);
+    let s2 = int(split(up2, " ")[0]);
+    // fractional part if present
+    let f1 = up1;
+    let f2 = up2;
+    let ms = (s2 - s1) * 1000;
     if (ms < 0)
         ms = 0;
-    return { ok: true, ms: ms == 0 ? 1 : ms * 1000 };
+    if (ms == 0)
+        ms = 1;
+    // Treat full timeout window as too slow
+    if (ms >= PROBE_MAX_MS)
+        return { ok: false, ms: ms };
+    return { ok: true, ms: ms };
 }
 
 function read_slots(section_name) {
@@ -185,8 +226,12 @@ function select_slots_from_outbounds(outbounds, slot_count) {
     // Round-robin by protocol so VLESS does not occupy all slots when listed first
     let by_type = {};
     let type_order = [];
+    let rejected = load_reject_tags();
     for (let outbound in array_or_empty(outbounds)) {
         if (!is_leaf_proxy_outbound(outbound))
+            continue;
+        let tag = as_string(outbound.tag || outbound.remark || "");
+        if (tag != "" && rejected[tag])
             continue;
         let t = as_string(outbound.type || "other");
         if (by_type[t] == null) {
@@ -340,7 +385,7 @@ function slot_refresh_interval_seconds(settings) {
     settings = object_or_empty(settings);
     if (length(keys(settings)) == 0)
         settings = load_settings_section();
-    let raw = trim(option(settings, "subscription_slot_refresh_interval", "15m"));
+    let raw = trim(option(settings, "subscription_slot_refresh_interval", "5m"));
     // support Ns/Nm/Nh or plain minutes
     if (raw == "")
         return 900;
@@ -371,5 +416,8 @@ return {
     select_slots_from_outbounds,
     is_leaf_proxy_outbound,
     slot_refresh_interval_seconds,
-    DEFAULT_SLOT_COUNT
+    DEFAULT_SLOT_COUNT,
+    save_reject_tags,
+    load_reject_tags,
+    PROBE_MAX_MS
 };
