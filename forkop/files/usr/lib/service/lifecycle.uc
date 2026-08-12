@@ -758,16 +758,11 @@ function start_impl() {
     if (status != 0)
         return status;
 
-    if (false) {
-        status = dnsmasq_configure(false);
-        if (status != 0)
-            return status;
-    }
-    else if (dnsmasq_has_forkop_managed_state()) {
-        status = dnsmasq_restore(true);
-        if (status != 0)
-            return status;
-    }
+    // Economy: write domain→nftset conf (no DHCP rewrite). Precise path still skips DHCP edits.
+    status = dnsmasq_configure(false);
+    if (status != 0)
+        return status;
+
 
     if (!config_set(CONFIG_NAME + ".settings.shutdown_correctly", "0"))
         return 1;
@@ -1272,18 +1267,12 @@ function reload(reason) {
     if (plan.needs_byedpi_restart == 1)
         module_success(BYEDPI_UC, [ "start-runtime" ]);
 
-    if (false && plan.needs_dnsmasq_configure == 1) {
-        status = dnsmasq_configure(true);
-        if (status != 0)
-            return abort_reload(status, true);
-        module_success(STATE_UC, [ "capture-reload-state", RELOAD_STATE_SNAPSHOT_FILE, as_string(RELOAD_STATE_FORMAT) ]);
-    }
-    else if (plan.needs_dnsmasq_restore == 1) {
-        status = dnsmasq_restore(true);
-        if (status != 0)
-            return abort_reload(status, true);
-        module_success(STATE_UC, [ "capture-reload-state", RELOAD_STATE_SNAPSHOT_FILE, as_string(RELOAD_STATE_FORMAT) ]);
-    }
+    // Always refresh economy nftset conf on reload (domains/community lists)
+    status = dnsmasq_configure(true);
+    if (status != 0)
+        return abort_reload(status, true);
+    module_success(STATE_UC, [ "capture-reload-state", RELOAD_STATE_SNAPSHOT_FILE, as_string(RELOAD_STATE_FORMAT) ]);
+
 
     if (plan.needs_cron_refresh == 1) {
         status = refresh_cron();

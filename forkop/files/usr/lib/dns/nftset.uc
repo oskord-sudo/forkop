@@ -126,8 +126,14 @@ function generate_nftset_conf() {
         }
 
         for (let key in ["domain", "domain_suffix"]) {
-            for (let v in split(uci_get(CONFIG_NAME + "." + name + "." + key), /[ \t\n]/))
-                add_dom(v);
+            let raw = uci_get(CONFIG_NAME + "." + name + "." + key);
+            for (let line in split(as_string(raw), "\n")) {
+                line = trim(replace(line, /#.*$/, ""));
+                if (line == "")
+                    continue;
+                for (let v in split(line, /[,\s]+/))
+                    add_dom(v);
+            }
         }
 
         for (let svc in split(uci_get(CONFIG_NAME + "." + name + ".community_lists"), /[ \t\n]/)) {

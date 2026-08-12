@@ -1416,6 +1416,22 @@ function add_urltest_outbound(config, section, urltest_id, urltest_candidate_tag
         interrupt_exist_connections: urltest_outbound.interrupt_exist_connections
     });
 
+    // Country/name filters must apply, but an empty URLTest kills "Fastest" switching.
+    // If the filter removed everything, fall back to all candidates (still ranked by URLTest).
+    if (length(urltest_outbounds) == 0) {
+        urltest_outbounds = unique_string_array(array_or_empty(urltest_candidate_tags));
+        urltest_outbound.outbounds = urltest_outbounds;
+        runtime_subscription.remember_urltest_group_config(state, urltest_tag, {
+            displayName: display_name,
+            outbounds: urltest_outbounds,
+            url: urltest_outbound.url,
+            interval: urltest_outbound.interval,
+            tolerance: urltest_outbound.tolerance,
+            idle_timeout: urltest_outbound.idle_timeout,
+            interrupt_exist_connections: urltest_outbound.interrupt_exist_connections
+        });
+    }
+
     if (length(urltest_outbounds) == 0)
         return {
             tag: "",
@@ -1510,18 +1526,25 @@ function add_proxy_selector(config, section, selector_tags, urltest_candidate_ta
         push(priority_tags, priority.tag);
     }
 
+    // Leaf list follows URLTest filters (country exclude/include must apply).
     selector_outbounds = dashboard_filtered_outbounds(section, selector_tags, state, group_outbounds);
-    // Filters can wipe the list (e.g. after removing one subscription). Fall back.
-    if (length(selector_outbounds) == 0)
-        selector_outbounds = unique_string_array(array_or_empty(selector_tags));
 
-    selector_default = length(selector_outbounds) > 0 ? selector_outbounds[0] : "";
+    // Prefer URLTest / priority as default so "Fastest" actually switches.
     if (length(urltest_tags) > 0 || length(priority_tags) > 0) {
+        let ordered = [];
         for (let tag in urltest_tags)
-            push(selector_outbounds, tag);
+            push(ordered, tag);
         for (let tag in priority_tags)
-            push(selector_outbounds, tag);
+            push(ordered, tag);
+        // Keep filtered leaf servers for manual pick in dashboard
+        for (let tag in selector_outbounds)
+            push(ordered, tag);
+        selector_outbounds = unique_string_array(ordered);
         selector_default = length(urltest_tags) > 0 ? urltest_tags[0] : priority_tags[0];
+    } else {
+        if (length(selector_outbounds) == 0)
+            selector_outbounds = unique_string_array(array_or_empty(selector_tags));
+        selector_default = length(selector_outbounds) > 0 ? selector_outbounds[0] : "";
     }
 
     if (length(selector_outbounds) == 0)

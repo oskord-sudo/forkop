@@ -4862,17 +4862,29 @@ function sectionIsEnabled(section_id) {
 
 function collectSectionListValues(section_id, keys) {
   const values = [];
+  const pushActiveTokens = (raw) => {
+    if (raw === null || raw === undefined) {
+      return;
+    }
+    // Always comment-aware: "#domain" and trailing comments are ignored
+    parseCommentAwareListTokens(`${raw}`).forEach((token) => {
+      const v = `${token.value || ""}`.trim();
+      if (!v || v.startsWith("#")) {
+        return;
+      }
+      values.push(v);
+    });
+  };
+
   keys.forEach((key) => {
     getConfigListValues(section_id, key).forEach((value) => {
-      values.push(`${value}`);
+      pushActiveTokens(value);
     });
     const textValue =
       uci.get(UCI_PACKAGE, section_id, key) ||
       uci.get(UCI_PACKAGE, section_id, `${key}_text`);
     if (textValue && typeof textValue === "string" && textValue.length) {
-      parseCommentAwareListTokens(textValue).forEach((token) => {
-        values.push(token.value);
-      });
+      pushActiveTokens(textValue);
     }
   });
   return values;
@@ -4888,8 +4900,12 @@ function buildCrossSectionValueIndex(optionKeys, normalizeValue) {
       return;
     }
 
+    // Disabled sections do not participate in conflict highlighting
+    if (!sectionIsEnabled(section_id)) {
+      return;
+    }
+
     const label = sectionDisplayLabel(section_id);
-    const enabled = sectionIsEnabled(section_id);
     const action = `${uci.get(UCI_PACKAGE, section_id, "action") || ""}`;
 
     collectSectionListValues(section_id, optionKeys).forEach((raw) => {
@@ -4913,7 +4929,7 @@ function buildCrossSectionValueIndex(optionKeys, normalizeValue) {
       }
       const list = index.get(normalized);
       if (!list.some((entry) => entry.id === section_id)) {
-        list.push({ id: section_id, label, enabled, action });
+        list.push({ id: section_id, label, enabled: true, action });
       }
     });
   });
@@ -4922,15 +4938,17 @@ function buildCrossSectionValueIndex(optionKeys, normalizeValue) {
 }
 
 function crossSectionConflictMessage(entries, currentSectionId) {
-  const others = (entries || []).filter((entry) => entry.id !== currentSectionId);
+  // Only conflicts with other *enabled* sections (commented values already excluded)
+  const others = (entries || []).filter(
+    (entry) => entry.id !== currentSectionId && entry.enabled !== false,
+  );
   if (!others.length) {
     return null;
   }
 
   const parts = others.map((entry) => {
-    const state = entry.enabled ? "" : ` (${_("disabled")})`;
     const action = entry.action ? `/${entry.action}` : "";
-    return `${entry.label}${action}${state}`;
+    return `${entry.label}${action}`;
   });
 
   return _("Already used in: %s").format(parts.join(", "));
