@@ -554,7 +554,8 @@ function supported_subscription_outbound(outbound) {
     if (t == "direct" || t == "selector" || t == "urltest" || t == "dns" || t == "block")
         return false;
     return t == "vless" || t == "vmess" || t == "trojan" || t == "shadowsocks" ||
-        t == "socks" || t == "hysteria2";
+        t == "shadowsocksr" || t == "socks" || t == "http" || t == "hysteria" ||
+        t == "hysteria2" || t == "tuic" || t == "anytls" || t == "wireguard";
 }
 
 function outbound_uses_xhttp(outbound) {
@@ -790,7 +791,7 @@ function apply_slots_filter(section_name, source_outbounds) {
     } catch (e) {
     }
 
-    let slot_count = 3;
+    let slot_count = 10;
     try {
         if (subscription_slots != null && subscription_slots.slot_count_from_settings != null)
             slot_count = subscription_slots.slot_count_from_settings({});
@@ -1510,7 +1511,11 @@ function add_proxy_selector(config, section, selector_tags, urltest_candidate_ta
     }
 
     selector_outbounds = dashboard_filtered_outbounds(section, selector_tags, state, group_outbounds);
-    selector_default = selector_outbounds[0];
+    // Filters can wipe the list (e.g. after removing one subscription). Fall back.
+    if (length(selector_outbounds) == 0)
+        selector_outbounds = unique_string_array(array_or_empty(selector_tags));
+
+    selector_default = length(selector_outbounds) > 0 ? selector_outbounds[0] : "";
     if (length(urltest_tags) > 0 || length(priority_tags) > 0) {
         for (let tag in urltest_tags)
             push(selector_outbounds, tag);
@@ -1520,7 +1525,7 @@ function add_proxy_selector(config, section, selector_tags, urltest_candidate_ta
     }
 
     if (length(selector_outbounds) == 0)
-        runtime_generate_unsupported("dashboard server filtering produced no usable outbounds");
+        runtime_generate_unsupported("connection section has no usable outbounds after filtering");
 
     push(config.outbounds, {
         type: "selector",

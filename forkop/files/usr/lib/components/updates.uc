@@ -727,7 +727,20 @@ function cron_refresh_plan_rows(settings, sections, bin, list_marker, subscripti
             push(rows, "subscription\t" + due_check_cron_schedule_text(min_interval) + " " + as_string(bin) + " subscription_update_if_due " + as_string(subscription_marker));
     }
 
-    let component_interval = settings_component_update_check_interval(settings);
+    
+    // periodic slot re-probe when subscription_mode=slots
+    try {
+        let slots_mod = require("subscription.slots");
+        if (slots_mod.subscription_mode_from_settings({}) == "slots") {
+            let sec = slots_mod.slot_refresh_interval_seconds({});
+            let sched = due_check_cron_schedule_text(sec);
+            let slots_marker = "# forkop-slots-refresh";
+            push(rows, "slots\t" + sched + " " + as_string(bin) + " slots_refresh_if_due " + slots_marker);
+        }
+    } catch (e) {
+    }
+
+let component_interval = settings_component_update_check_interval(settings);
     if (component_interval != "") {
         let component_seconds = duration_to_seconds_value(component_interval);
         if (component_seconds == null) {
@@ -758,7 +771,7 @@ function cron_refresh_plan(settings, sections, bin, list_marker, subscription_ma
 
 function cron_refresh_apply_result(settings, sections, existing_crontab, bin, list_marker, subscription_marker, component_marker) {
     let plan = cron_refresh_plan_rows(settings, sections, bin, list_marker, subscription_marker, component_marker);
-    let filtered_crontab = filter_cron_markers_text(existing_crontab, [ list_marker, subscription_marker, component_marker ]);
+    let filtered_crontab = filter_cron_markers_text(existing_crontab, [ list_marker, subscription_marker, component_marker, "# forkop-slots-refresh" ]);
     let cron_jobs = "";
     let logs = [ { level: "info", message: "The cron job removed" } ];
     let tab = "\t";
@@ -782,6 +795,10 @@ function cron_refresh_apply_result(settings, sections, existing_crontab, bin, li
         else if (type == "subscription") {
             cron_jobs += rest + "\n";
             push(logs, { level: "info", message: "The subscription cron job has been created: " + rest });
+        }
+        else if (type == "slots") {
+            cron_jobs += rest + "\n";
+            push(logs, { level: "info", message: "The slots refresh cron job has been created: " + rest });
         }
         else if (type == "subscription-error") {
             let section_separator = index(rest, tab);
@@ -828,7 +845,7 @@ function log_cron_apply_result(result) {
 function remove_cron_jobs(list_marker, subscription_marker, component_marker) {
     let crontab = command_output_from_args([ "crontab", "-l" ]);
     let result = {
-        crontab: filter_cron_markers_text(crontab, [ list_marker, subscription_marker, component_marker ]),
+        crontab: filter_cron_markers_text(crontab, [ list_marker, subscription_marker, component_marker, "# forkop-slots-refresh" ]),
         logs: [ { level: "info", message: "The cron job removed" } ]
     };
 
@@ -2752,6 +2769,48 @@ function subscription_update_common(force, target_section, target_source_index) 
     return ok ? 0 : 1;
 }
 
+
+function slots_mode_enabled() {
+    try {
+        let slots = require("subscription.slots");
+        return slots.subscription_mode_from_settings({}) == "slots";
+    } catch (e) {
+        return false;
+    }
+}
+
+function slots_refresh_stamp_path() {
+    return "/tmp/forkop/slots/.last_refresh";
+}
+
+function slots_refresh_if_due() {
+    if (!slots_mode_enabled())
+        return;
+
+    let slots = require("subscription.slots");
+    let interval = slots.slot_refresh_interval_seconds({});
+    let stamp = slots_refresh_stamp_path();
+    let now = time();
+    let last = 0;
+    try {
+        let raw = fs.readfile(stamp);
+        last = int(trim(as_string(raw || "0")));
+    } catch (e) {
+        last = 0;
+    }
+    if (last > 0 && (now - last) < interval)
+        return;
+
+    // Trigger config regenerate + probe via service reload
+    system("mkdir -p /tmp/forkop/slots");
+    try {
+        fs.writefile(stamp, sprintf("%d\n", now));
+    } catch (e) {
+    }
+    log_message("slots: periodic refresh (interval " + interval + "s)", "info");
+    system("/usr/bin/forkop reload >/dev/null 2>&1 &");
+}
+
 function subscription_update_if_due() {
     log_message("Starting due subscription update", "info");
     exit(subscription_update_common(false, "", ""));
@@ -2940,6 +2999,8 @@ else if (mode == "subscription-update")
     subscription_update(ARGV[1], ARGV[2]);
 else if (mode == "subscription-update-if-due")
     subscription_update_if_due();
+else if (mode == "slots-refresh-if-due")
+    slots_refresh_if_due();
 else if (mode == "subscription-update-async")
     subscription_update_async(ARGV[1], ARGV[2]);
 else if (mode == "subscription-update-status")

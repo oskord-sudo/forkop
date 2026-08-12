@@ -144,6 +144,7 @@ function command_spec(command) {
         subscription_update_async: [ "components/updates.uc", "subscription-update-async", 2 ],
         subscription_update_status: [ "components/updates.uc", "subscription-update-status", 1 ],
         subscription_update_if_due: [ "components/updates.uc", "subscription-update-if-due", 0 ],
+        slots_refresh_if_due: [ "components/updates.uc", "slots-refresh-if-due", 0 ],
         check_proxy: [ "diagnostics/runtime.uc", "check-proxy", 0 ],
         check_nft: [ "diagnostics/runtime.uc", "check-nft", 0 ],
         check_nft_rules: [ "diagnostics/runtime.uc", "check-nft-rules", 0 ],

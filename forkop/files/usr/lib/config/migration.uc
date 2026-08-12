@@ -1295,7 +1295,9 @@ function migrate_routing_mode(ctx) {
     if (option(ctx.model.settings, "subscription_mode", "") == "")
         set_option(ctx, ctx.model.settings, "subscription_mode", "slots");
     if (option(ctx.model.settings, "subscription_slot_count", "") == "")
-        set_option(ctx, ctx.model.settings, "subscription_slot_count", "3");
+        set_option(ctx, ctx.model.settings, "subscription_slot_count", "10");
+    if (option(ctx.model.settings, "subscription_slot_refresh_interval", "") == "")
+        set_option(ctx, ctx.model.settings, "subscription_slot_refresh_interval", "15m");
     if (option(ctx.model.settings, "economy_domain_resolve", "") == "")
         set_option(ctx, ctx.model.settings, "economy_domain_resolve", "dnsmasq_nftset");
 }

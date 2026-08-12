@@ -4659,6 +4659,20 @@ function attachAnnotatedTextarea(textarea, analyzer) {
         analysis.annotations,
       );
       syncAnnotatedTextareaOverlay(this.textarea, this.wrapper, this.overlay);
+      // Overlay has pointer-events:none — put hints on the textarea itself
+      const notes = (analysis.annotations || [])
+        .map((a) => a.message)
+        .filter(Boolean);
+      if (notes.length) {
+        this.textarea.title = notes.join("\n");
+        this.textarea.setAttribute(
+          "data-forkop-conflict",
+          notes.join(" | "),
+        );
+      } else {
+        this.textarea.removeAttribute("title");
+        this.textarea.removeAttribute("data-forkop-conflict");
+      }
     },
   };
 
@@ -4986,57 +5000,6 @@ function analyzeTextListValue(value, validateItem, emptyMessage, options = {}) {
   return {
     valid: false,
     message: [getValidationHeaderText(), ...errors, ...warnings].join("\n"),
-    annotations: finalizeAnnotations(annotationMap),
-  };
-}) {
-  const text = value ? `${value}` : "";
-  if (!text.length) {
-    return { valid: true, message: "", annotations: [] };
-  }
-
-  const tokens = parseCommentAwareListTokens(text);
-  if (!tokens.length) {
-    return { valid: false, message: emptyMessage, annotations: [] };
-  }
-
-  const duplicateMessage = options.duplicateMessage || getDuplicateValueText();
-  const annotationMap = new Map();
-  const errors = [];
-  const seen = new Set();
-
-  tokens.forEach((token) => {
-    if (typeof validateItem === "function") {
-      const validation = validateItem(token.value);
-      if (!validation.valid) {
-        errors.push(`${token.value}: ${validation.message}`);
-        addAnnotationIssue(annotationMap, token, validation.message);
-      }
-    }
-
-    const normalized = options.normalizeDuplicateValue
-      ? options.normalizeDuplicateValue(token.value)
-      : token.value;
-
-    if (!normalized) {
-      return;
-    }
-
-    if (seen.has(normalized)) {
-      errors.push(`${token.value}: ${duplicateMessage}`);
-      addAnnotationIssue(annotationMap, token, duplicateMessage);
-      return;
-    }
-
-    seen.add(normalized);
-  });
-
-  if (!errors.length) {
-    return { valid: true, message: "", annotations: [] };
-  }
-
-  return {
-    valid: false,
-    message: [getValidationHeaderText(), ...errors].join("\n"),
     annotations: finalizeAnnotations(annotationMap),
   };
 }

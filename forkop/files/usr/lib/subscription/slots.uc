@@ -27,9 +27,9 @@ let list_option = common.list_option;
 let read_json_file = common.read_json_file;
 
 const SLOTS_DIR = getenv("FORKOP_SLOTS_DIR") || "/tmp/forkop/slots";
-const DEFAULT_SLOT_COUNT = 3;
+const DEFAULT_SLOT_COUNT = 10;
 const PROBE_TIMEOUT_SEC = 1;
-const PROBE_MAX_CANDIDATES = 15;
+const PROBE_MAX_CANDIDATES = 40;
 
 function trim(value) {
     return replace(replace(as_string(value), /^\s+/, ""), /\s+$/, "");
@@ -182,17 +182,40 @@ function write_slots(section_name, payload) {
 }
 
 function select_slots_from_outbounds(outbounds, slot_count) {
-    let candidates = [];
+    // Round-robin by protocol so VLESS does not occupy all slots when listed first
+    let by_type = {};
+    let type_order = [];
     for (let outbound in array_or_empty(outbounds)) {
         if (!is_leaf_proxy_outbound(outbound))
             continue;
-        push(candidates, outbound);
-        if (length(candidates) >= PROBE_MAX_CANDIDATES)
-            break;
+        let t = as_string(outbound.type || "other");
+        if (by_type[t] == null) {
+            by_type[t] = [];
+            push(type_order, t);
+        }
+        if (length(by_type[t]) < PROBE_MAX_CANDIDATES)
+            push(by_type[t], outbound);
+    }
+
+    let candidates = [];
+    let more = true;
+    let idx = 0;
+    while (more && length(candidates) < PROBE_MAX_CANDIDATES) {
+        more = false;
+        for (let t in type_order) {
+            let arr = by_type[t];
+            if (idx < length(arr)) {
+                push(candidates, arr[idx]);
+                more = true;
+                if (length(candidates) >= PROBE_MAX_CANDIDATES)
+                    break;
+            }
+        }
+        idx++;
     }
 
     let alive = [];
-    // First-alive pass: stop early when we have slot_count
+    // Probe all candidates (do not stop at slot_count)
     for (let outbound in candidates) {
         let probe = probe_outbound(outbound);
         if (!probe.ok)
@@ -202,27 +225,33 @@ function select_slots_from_outbounds(outbounds, slot_count) {
             copy[k] = v;
         copy.__forkop_probe_ms = probe.ms;
         push(alive, copy);
-        if (length(alive) >= slot_count)
-            break;
     }
 
-    // If nothing alive, fall back to first leaf candidates (no probe) so traffic can still try
     if (length(alive) == 0) {
-        for (let outbound in candidates) {
-            let copy = {};
-            for (let k, v in outbound)
-                copy[k] = v;
-            push(alive, copy);
-            if (length(alive) >= slot_count)
+        let selected = [];
+        for (let t in type_order) {
+            if (length(selected) >= slot_count)
                 break;
+            if (length(by_type[t]) > 0)
+                push(selected, by_type[t][0]);
         }
-        return {
-            mode: "fallback-no-probe",
-            outbounds: alive
-        };
+        for (let outbound in candidates) {
+            if (length(selected) >= slot_count)
+                break;
+            let already = false;
+            for (let s in selected) {
+                if (as_string(s.tag || "") == as_string(outbound.tag || "") &&
+                    as_string(s.server || "") == as_string(outbound.server || "")) {
+                    already = true;
+                    break;
+                }
+            }
+            if (!already)
+                push(selected, outbound);
+        }
+        return { mode: "fallback-no-probe", outbounds: selected };
     }
 
-    // Sort by probe ms ascending (rough "fastest")
     for (let i = 0; i < length(alive); i++) {
         for (let j = i + 1; j < length(alive); j++) {
             let a = int(alive[i].__forkop_probe_ms || 999999);
@@ -236,13 +265,32 @@ function select_slots_from_outbounds(outbounds, slot_count) {
     }
 
     let selected = [];
-    for (let i = 0; i < length(alive) && i < slot_count; i++)
-        push(selected, alive[i]);
+    let used = {};
+    for (let t in type_order) {
+        if (length(selected) >= slot_count)
+            break;
+        for (let outbound in alive) {
+            if (as_string(outbound.type || "") != t)
+                continue;
+            let key = as_string(outbound.tag || "") + "|" + as_string(outbound.server || "");
+            if (used[key])
+                continue;
+            used[key] = true;
+            push(selected, outbound);
+            break;
+        }
+    }
+    for (let outbound in alive) {
+        if (length(selected) >= slot_count)
+            break;
+        let key = as_string(outbound.tag || "") + "|" + as_string(outbound.server || "");
+        if (used[key])
+            continue;
+        used[key] = true;
+        push(selected, outbound);
+    }
 
-    return {
-        mode: "probed",
-        outbounds: selected
-    };
+    return { mode: "probed", outbounds: selected };
 }
 
 function refresh_section_slots(section_name, source_outbounds, slot_count) {
@@ -288,27 +336,28 @@ function settings_from_uci() {
     return {};
 }
 
-// CLI
-let mode = as_string(ARGV[0] || "");
-if (mode == "path") {
-    print(slots_path(as_string(ARGV[1] || "x")), "\n");
-} else if (mode == "read") {
-    let data = read_slots(as_string(ARGV[1] || ""));
-    print(sprintf("%J\n", data == null ? {} : data));
-} else if (mode == "refresh-json") {
-    // ARGV[1] = path to json file with section/outbounds/slot_count
-    let data = object_or_empty(read_json_file(as_string(ARGV[1] || "")));
-    let ok = refresh_section_slots(
-        as_string(data.section || ""),
-        array_or_empty(data.outbounds),
-        int(data.slot_count || DEFAULT_SLOT_COUNT)
-    );
-    print(ok ? "ok\n" : "fail\n");
-    exit(ok ? 0 : 1);
-} else if (mode != "") {
-    warn("Usage: slots.uc path <section>|read <section>|refresh-json\n");
-    exit(1);
+function slot_refresh_interval_seconds(settings) {
+    settings = object_or_empty(settings);
+    if (length(keys(settings)) == 0)
+        settings = load_settings_section();
+    let raw = trim(option(settings, "subscription_slot_refresh_interval", "15m"));
+    // support Ns/Nm/Nh or plain minutes
+    if (raw == "")
+        return 900;
+    let m = match(raw, /^([0-9]+)([smhd])?$/);
+    if (m == null) {
+        let n = int(raw);
+        return n > 0 ? n * 60 : 900;
+    }
+    let n = int(m[1]);
+    let u = m[2] || "m";
+    if (u == "s") return n < 60 ? 60 : n;
+    if (u == "m") return n * 60;
+    if (u == "h") return n * 3600;
+    if (u == "d") return n * 86400;
+    return 900;
 }
+
 
 return {
     SLOTS_DIR,
@@ -320,5 +369,7 @@ return {
     slots_outbounds_for_section,
     refresh_section_slots,
     select_slots_from_outbounds,
-    is_leaf_proxy_outbound
+    is_leaf_proxy_outbound,
+    slot_refresh_interval_seconds,
+    DEFAULT_SLOT_COUNT
 };
